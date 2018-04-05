@@ -30,3 +30,35 @@ con.query("INSERT INTO users (UserId , Tag, Bot, AvatarUrl, Edited) SELECT * FRO
     });
   });
 });
+
+/*var guilds = client.guilds.array();
+for (var i = 0, len = guilds.length; i < len; i++) {
+  if (guilds[i].available) {
+    var tempid = guilds[i].id;
+    escapeqry("INSERT INTO guilds (GuildId, Name, Available) SELECT * FROM (SELECT ?, ?, 1 ) AS tmp WHERE NOT EXISTS (SELECT GuildId FROM guilds WHERE GuildId = ? ) LIMIT 1;", [tempid, guilds[i].name, tempid]);
+    var tempmembers = guilds[i].members.array();
+    for (var k = 0, memblen = tempmembers.length; k < memblen; k++) {
+      var userId = tempmembers[k].id;
+      var avatarPath = path.resolve(__dirname, './avatars',  userId);
+      var avatarUrl = tempmembers[k].user.displayAvatarURL;
+      escapeqry("INSERT INTO users (UserId , Tag, Bot, AvatarUrl, AvatarPath, Edited) SELECT * FROM (SELECT ?, ?, ?, ?, ?, 0 ) AS tmp WHERE NOT EXISTS (SELECT UserId FROM users WHERE UserId = ? ) LIMIT 1;", [userId, tempmembers[k].user.tag, tempmembers[k].user.bot, avatarUrl, avatarPath + "-0000.png", tempmembers[k].id]);
+      con.query("SELECT AvatarUrl, AvatarPath FROM users WHERE UserId = ?", [userId], function(err, result, fields) {
+        if (err) throw err;
+        if(result[0].AvatarUrl !== avatarUrl){
+          console.log(avatarUrl);
+          download(path.resolve(avatarPath + "-0.png"), avatarUrl);
+        }
+      });
+    }
+  }
+}
+var tempchannels = client.channels.array();
+for (var j = 0, chlen = tempchannels.length; j < chlen; j++) {
+  if (tempchannels[j].type === 'category') {
+    escapeqry("INSERT INTO categories (CategoryId, Name, GuildId) SELECT * FROM (SELECT ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT CategoryId FROM categories WHERE CategoryId = ? ) LIMIT 1;", [tempchannels[j].id, tempchannels[j].name, tempid, tempchannels[j].id]);
+  } else if (tempchannels[j].type === 'voice' || tempchannels[j].type === 'text') {
+    escapeqry("INSERT INTO channels (ChannelId, Name, Type, CategoryId) SELECT * FROM (SELECT ?, ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT ChannelId FROM channels WHERE ChannelId = ? ) LIMIT 1;", [tempchannels[j].id, tempchannels[j].name, tempchannels[j].type, tempchannels[j].parentID, tempchannels[j].id]);
+  } else if (tempchannels[j].type === 'dm') {
+    escapeqry("INSERT INTO dmchannels (DmId, UserId) SELECT * FROM (SELECT ?, ? ) AS tmp WHERE NOT EXISTS (SELECT DmId FROM dmchannels WHERE DmId = ? ) LIMIT 1;", [tempchannels[j].id, tempchannels[j].recipient.id]);
+  }
+}*/

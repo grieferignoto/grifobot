@@ -74,7 +74,7 @@ function createdb() {
   qry("CREATE TABLE IF NOT EXISTS dmchannels(DmChannelId bigint, UserId bigint, PRIMARY KEY(DmChannelId), FOREIGN KEY (UserId) REFERENCES users(UserId))", 5);
   qry("CREATE TABLE IF NOT EXISTS attachments(AttachmentId bigint, Path nvarchar(500), PRIMARY KEY (AttachmentId))", 6);
   qry("CREATE TABLE IF NOT EXISTS dms(DmId bigint, Content nvarchar(2010), Timestamp bigint, AttachmentId bigint, DmChannelId bigint, PRIMARY KEY (DmId), FOREIGN KEY (DmChannelId) REFERENCES dmchannels (DmChannelId), FOREIGN KEY (AttachmentId) REFERENCES attachments(AttachmentId))", 7);
-  qry("CREATE TABLE IF NOT EXISTS messages (MessageId bigint, UserId bigint, Content nvarchar(2010), Timestamp bigint, AttachmentId bigint, ChannelId bigint, PRIMARY KEY (MessageId), FOREIGN KEY (ChannelId) REFERENCES channels(ChannelId), FOREIGN KEY (AttachmentId) REFERENCES attachments(AttachmentId))", 8);
+  qry("CREATE TABLE IF NOT EXISTS messages (MessageId bigint, UserId bigint, Content nvarchar(2010), Timestamp bigint, AttachmentId bigint, ChannelId bigint, PRIMARY KEY (MessageId), FOREIGN KEY (UserId) REFERENCES users(UserId), FOREIGN KEY (AttachmentId) REFERENCES attachments(AttachmentId), FOREIGN KEY (ChannelId) REFERENCES channels(ChannelId))", 8);
 }
 
 function populatedb(cb) {
@@ -185,47 +185,40 @@ function populatedb(cb) {
       },
       function channels(cb) {
         var channels = client.channels.array();
-        async.each(channels, function (channel, cb){
-          if(channel.type === 'category'){
-            con.query("INSERT INTO categories (CategoryId, Name, GuildId) SELECT * FROM (SELECT ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT CategoryId FROM categories WHERE CategoryId = ? ) LIMIT 1;", [channel.id, channel.name, channel.guild.id, channel.id], function(err, result, fields) {
-              if (err) {
-                cb(err);
-              } else {
-                cb(null, result);
-              }
-            });
-          } else if (channel.type === 'dm'){
-            con.query("INSERT INTO dmchannels (DmId, UserId) SELECT * FROM (SELECT ?, ? ) AS tmp WHERE NOT EXISTS (SELECT DmId FROM dmchannels WHERE DmId = ? ) LIMIT 1;", [channel.id, channel.recipient.id], function(err, result, fields) {
-              if (err) {
-                cb(err);
-              } else {
-                cb(null, result);
-              }
-            });
-          } else {
-            con.query("INSERT INTO channels (ChannelId, Name, Type, CategoryId, GuildId) SELECT * FROM (SELECT ?, ?, ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT ChannelId FROM channels WHERE ChannelId = ? ) LIMIT 1;", [channel.id, channel.name, channel.type, channel.parentID, channel.guild.id, channel.id], function(err, result, fields) {
-              if (err) {
-                cb(err);
-              } else {
-                cb(null, result);
-              }
-            });
-          }
-        },
-        function doneChannels(err, result){
-          if (err) {
-            cb(err);
-          } else {
-            cb(null, 'doneChannels');
-          }
-        });
-        /*if (tempchannels[j].type === 'category') {
-          escapeqry("INSERT INTO categories (CategoryId, Name, GuildId) SELECT * FROM (SELECT ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT CategoryId FROM categories WHERE CategoryId = ? ) LIMIT 1;", [tempchannels[j].id, tempchannels[j].name, tempid, tempchannels[j].id]);
-        } else if (tempchannels[j].type === 'voice' || tempchannels[j].type === 'text') {
-          escapeqry("INSERT INTO channels (ChannelId, Name, Type, CategoryId) SELECT * FROM (SELECT ?, ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT ChannelId FROM channels WHERE ChannelId = ? ) LIMIT 1;", [tempchannels[j].id, tempchannels[j].name, tempchannels[j].type, tempchannels[j].parentID, tempchannels[j].id]);
-        } else if (tempchannels[j].type === 'dm') {
-          escapeqry("INSERT INTO dmchannels (DmId, UserId) SELECT * FROM (SELECT ?, ? ) AS tmp WHERE NOT EXISTS (SELECT DmId FROM dmchannels WHERE DmId = ? ) LIMIT 1;", [tempchannels[j].id, tempchannels[j].recipient.id]);
-        }*/
+        async.each(channels, function(channel, cb) {
+            if (channel.type === 'category') {
+              con.query("INSERT INTO categories (CategoryId, Name, GuildId) SELECT * FROM (SELECT ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT CategoryId FROM categories WHERE CategoryId = ? ) LIMIT 1;", [channel.id, channel.name, channel.guild.id, channel.id], function(err, result, fields) {
+                if (err) {
+                  cb(err);
+                } else {
+                  cb(null, result);
+                }
+              });
+            } else if (channel.type === 'dm') {
+              con.query("INSERT INTO dmchannels (DmId, UserId) SELECT * FROM (SELECT ?, ? ) AS tmp WHERE NOT EXISTS (SELECT DmId FROM dmchannels WHERE DmId = ? ) LIMIT 1;", [channel.id, channel.recipient.id], function(err, result, fields) {
+                if (err) {
+                  cb(err);
+                } else {
+                  cb(null, result);
+                }
+              });
+            } else {
+              con.query("INSERT INTO channels (ChannelId, Name, Type, CategoryId, GuildId) SELECT * FROM (SELECT ?, ?, ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT ChannelId FROM channels WHERE ChannelId = ? ) LIMIT 1;", [channel.id, channel.name, channel.type, channel.parentID, channel.guild.id, channel.id], function(err, result, fields) {
+                if (err) {
+                  cb(err);
+                } else {
+                  cb(null, result);
+                }
+              });
+            }
+          },
+          function doneChannels(err, result) {
+            if (err) {
+              cb(err);
+            } else {
+              cb(null, 'doneChannels');
+            }
+          });
       }
     ],
     function donewithParallel(err, result) {
@@ -237,37 +230,42 @@ function populatedb(cb) {
       }
     });
 }
-/*var guilds = client.guilds.array();
-for (var i = 0, len = guilds.length; i < len; i++) {
-  if (guilds[i].available) {
-    var tempid = guilds[i].id;
-    escapeqry("INSERT INTO guilds (GuildId, Name, Available) SELECT * FROM (SELECT ?, ?, 1 ) AS tmp WHERE NOT EXISTS (SELECT GuildId FROM guilds WHERE GuildId = ? ) LIMIT 1;", [tempid, guilds[i].name, tempid]);
-    var tempmembers = guilds[i].members.array();
-    for (var k = 0, memblen = tempmembers.length; k < memblen; k++) {
-      var userId = tempmembers[k].id;
-      var avatarPath = path.resolve(__dirname, './avatars',  userId);
-      var avatarUrl = tempmembers[k].user.displayAvatarURL;
-      escapeqry("INSERT INTO users (UserId , Tag, Bot, AvatarUrl, AvatarPath, Edited) SELECT * FROM (SELECT ?, ?, ?, ?, ?, 0 ) AS tmp WHERE NOT EXISTS (SELECT UserId FROM users WHERE UserId = ? ) LIMIT 1;", [userId, tempmembers[k].user.tag, tempmembers[k].user.bot, avatarUrl, avatarPath + "-0000.png", tempmembers[k].id]);
-      con.query("SELECT AvatarUrl, AvatarPath FROM users WHERE UserId = ?", [userId], function(err, result, fields) {
-        if (err) throw err;
-        if(result[0].AvatarUrl !== avatarUrl){
-          console.log(avatarUrl);
-          download(path.resolve(avatarPath + "-0.png"), avatarUrl);
+
+function processMsg(msg, cb){
+  if (msg.attachments.array().length > 0) {
+    var filenameext = msg.attachments.first().filename;
+    var n = filenameext.lastIndexOf(".");
+    var attachPath = path.resolve(__dirname, './attachments', (filenameext.substring(0,n)+ "-" + msg.attachments.first().id.toString() +filenameext.substring(n)));
+    console.log(attachPath);
+    async.series([
+        function(cb) {
+          con.query("INSERT INTO attachments (AttachmentId, Path) VALUES (?, ?)", [msg.attachments.first().id, attachPath ], function(err, result, fields) {
+            if (err) {
+              cb(err);
+            } else {
+              cb(null, result);
+            }
+          });
+        },
+        function(cb) {
+          con.query("INSERT INTO messages (MessageId, UserId, Content, Timestamp, AttachmentId, ChannelId ) VALUES (?, ?, ?, ?, ?, ?)", [msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.attachments.first().id, msg.channel.id], function(err, result, fields) {
+            if (err) {
+              cb(err);
+            } else {
+              cb(null, result);
+            }
+          });
+        }
+      ],
+      function messageAttach(err, result) {
+        if (err) {
+          cb(err);
+        } else {
+          cb(null, 'doneMessageWithAttach');
         }
       });
-    }
   }
 }
-var tempchannels = client.channels.array();
-for (var j = 0, chlen = tempchannels.length; j < chlen; j++) {
-  if (tempchannels[j].type === 'category') {
-    escapeqry("INSERT INTO categories (CategoryId, Name, GuildId) SELECT * FROM (SELECT ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT CategoryId FROM categories WHERE CategoryId = ? ) LIMIT 1;", [tempchannels[j].id, tempchannels[j].name, tempid, tempchannels[j].id]);
-  } else if (tempchannels[j].type === 'voice' || tempchannels[j].type === 'text') {
-    escapeqry("INSERT INTO channels (ChannelId, Name, Type, CategoryId) SELECT * FROM (SELECT ?, ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT ChannelId FROM channels WHERE ChannelId = ? ) LIMIT 1;", [tempchannels[j].id, tempchannels[j].name, tempchannels[j].type, tempchannels[j].parentID, tempchannels[j].id]);
-  } else if (tempchannels[j].type === 'dm') {
-    escapeqry("INSERT INTO dmchannels (DmId, UserId) SELECT * FROM (SELECT ?, ? ) AS tmp WHERE NOT EXISTS (SELECT DmId FROM dmchannels WHERE DmId = ? ) LIMIT 1;", [tempchannels[j].id, tempchannels[j].recipient.id]);
-  }
-}*/
 /*// TODO:
 -Se Gabri manda più di x messaggi più corti di y lettere in z tempo,  KICK ABBUSO PORKADDIO;
 -Chat Log;
@@ -288,19 +286,27 @@ client.on('ready', () => {
   populatedb(function(err, result) {
     //console.log(result);
   });
+  dbdone = true;
 });
 
 client.on('message', msg => {
   if (dbdone) {
-    //escapeqry("INSERT INTO guilds (GuildId, Name, Available) SELECT * FROM (SELECT ?, ?, ?) AS tmp WHERE NOT EXISTS (SELECT GuildId FROM guilds WHERE Id = ? ) LIMIT 1;")
-    //escapeqry("INSERT INTO messages (Id, Author, Channel, Content, Timestamp) VALUES (?, ?, ?, ?, ?)", [msg.id, msg.author.tag, msg.cleanContent, msg.createdTimestamp, msg.channel.id]);
+    processMsg(msg, function(err, result){
+      //console.log(result);
+    });
+    /*console.log(msg.attachments.array().length);
+    if (msg.attachments.array().length > 0) {
+      console.log(msg.attachments.first().filename);
+    }*/
+    //escapeqry("INSERT INTO attachments(AttachmentId)")
+    //escapeqry("INSERT INTO messages (MessageId, UserId, Content, Timestamp, AttachmentId, ChannelId ) VALUES (?, ?, ?, ?, ?, ?)", [msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.attachments.first().id, msg.channel.id]);
     var lulz = msg.author.id;
     var lulz2 = msg.author.discriminator;
     var lulz3 = msg.author.username;
     var lulz4 = msg.author.tag;
     var lulz5 = msg.channel.name;
     var lulz6 = msg.channel.id;
-    console.log(lulz, lulz5, lulz6);
+    console.log(msg.content);
     //msg.reply(lulz);
   }
 });

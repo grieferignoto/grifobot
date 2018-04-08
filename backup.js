@@ -62,3 +62,53 @@ for (var j = 0, chlen = tempchannels.length; j < chlen; j++) {
     escapeqry("INSERT INTO dmchannels (DmId, UserId) SELECT * FROM (SELECT ?, ? ) AS tmp WHERE NOT EXISTS (SELECT DmId FROM dmchannels WHERE DmId = ? ) LIMIT 1;", [tempchannels[j].id, tempchannels[j].recipient.id]);
   }
 }*/
+
+
+
+/*    async.series([
+        function(cb) {
+          con.query("INSERT INTO attachments (AttachmentId, Path) VALUES (?, ?)", [msg.attachments.first().id, attachPath], function(err, result, fields) {
+            if (err) {
+              cb(err);
+            } else {
+              cb(null, result);
+            }
+          });
+        },
+        function(cb) {
+        if(msg.channel.type === 'text'){
+          con.query("INSERT INTO messages (MessageId, UserId, Content, Timestamp, AttachmentId, ChannelId ) VALUES (?, ?, ?, ?, ?, ?)", [msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.attachments.first().id, msg.channel.id], function(err, result, fields) {
+            if (err) {
+              cb(err);
+            } else {
+              cb(null, result);
+            }
+          });
+        } else {
+          async.series([
+          function(cb){
+
+
+          con.query("INSERT INTO messages (MessageId, UserId, Content, Timestamp, AttachmentId, ChannelId ) VALUES (?, ?, ?, ?, ?, ?)", [msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.attachments.first().id, msg.channel.id], function(err, result, fields) {
+            if (err) {
+              cb(err);
+            } else {
+              cb(null, result);
+            }
+          });
+
+        },
+        function(cb){
+
+        }
+        }
+        }
+      ],
+      function messageAttach(err, result) {
+        if (err) {
+          cb(err);
+        } else {
+          cb(null, 'doneMessageWithAttach');
+        }
+      });
+  }*/

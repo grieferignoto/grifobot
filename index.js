@@ -12,7 +12,8 @@ var dbdone = false;
 var con = mysql.createConnection({
   host: "localhost",
   user: "root",
-  password: ""
+  password: "",
+  multipleStatements: true
 });
 
 con.connect(function(err) {
@@ -77,80 +78,90 @@ function createdb() {
   qry("CREATE TABLE IF NOT EXISTS messages (MessageId bigint, UserId bigint, Content nvarchar(2010), Timestamp bigint, AttachmentId bigint, ChannelId bigint, PRIMARY KEY (MessageId), FOREIGN KEY (UserId) REFERENCES users(UserId), FOREIGN KEY (AttachmentId) REFERENCES attachments(AttachmentId), FOREIGN KEY (ChannelId) REFERENCES channels(ChannelId))", 8);
 }
 
+async function handleUsers(user, cb) {
+  var avatarPath = path.resolve(__dirname, './avatars', user.id);
+  async.series([
+      function insert(cb) {
+        con.query("INSERT INTO users (UserId , Tag, Bot, AvatarUrl, Edited) SELECT * FROM (SELECT ?, ?, ?, ?, 0 ) AS tmp WHERE NOT EXISTS (SELECT UserId FROM users WHERE UserId = ? ) LIMIT 1;", [user.id, user.tag, user.bot, user.displayAvatarURL, user.id], function(err, result, fields) {
+          if (err) {
+            cb(err);
+          } else {
+            cb(null, result);
+          }
+        });
+      },
+      function avatar(cb) {
+        async.waterfall([
+            function(cb) {
+              con.query("SELECT AvatarUrl, AvatarPath FROM users WHERE UserId = ?", user.id, function(err, result, fields) {
+                if (err) {
+                  cb(err);
+                } else {
+                  //console.log(result);
+                  var currentPath = result[0].AvatarPath;
+                  var newPath;
+                  if (currentPath === null) {
+                    //console.log("e null");
+                    newPath = path.resolve(avatarPath + "-0000" + ".png");
+                  } else if (result[0].AvatarUrl !== user.displayAvatarURL) {
+                    //console.log("sono entrato perchè server = " + result[0].AvatarUrl + " e db = " + avatarUrl + "e userid" + userId);
+                    newPath = path.resolve(avatarPath + "-" + ((parseInt((currentPath.substr(currentPath.length - 8)).substr(0, 4)) + 1).toString().padStart(4, "0")) + ".png");
+                  } else {
+                    //console.log(   ((parseInt((currentPath.substr(currentPath.length - 8)).substr(0,4)) + 1).toString().padStart(4, "0"))   );
+                    newPath = "unchanged";
+                  }
+                  cb(null, newPath);
+                }
+              });
+            },
+            function(path, cb) {
+              if (!(path === "unchanged")) {
+                con.query("UPDATE users SET AvatarUrl = ?, AvatarPath = ? WHERE UserId = ?", [user.displayAvatarURL, path, user.id], function(err, result, fields) {
+                  if (err) {
+                    cb(err);
+                  } else {
+                    download(path, user.displayAvatarURL);
+                    console.log("aggiornato");
+                    cb(null, result);
+                  }
+                });
+              } else {
+                cb(null, 'unchanged');
+              }
+            }
+          ],
+          function(err, result) {
+            if (err) {
+              cb(err);
+            } else {
+              //console.log("ho tornato");
+              cb(null, result);
+            }
+          });
+      }
+    ],
+    function(err, result) {
+      if (err) {
+        cb(err);
+      } else {
+        //console.log("bnanai");
+        cb(null, result);
+      }
+    });
+}
+
 function populatedb(cb) {
   async.parallel([
       function users(cb) {
         var users = client.users.array();
         async.each(users, function(user, cb) {
-            var avatarPath = path.resolve(__dirname, './avatars', user.id);
-            async.series([
-                function insert(cb) {
-                  con.query("INSERT INTO users (UserId , Tag, Bot, AvatarUrl, Edited) SELECT * FROM (SELECT ?, ?, ?, ?, 0 ) AS tmp WHERE NOT EXISTS (SELECT UserId FROM users WHERE UserId = ? ) LIMIT 1;", [user.id, user.tag, user.bot, user.displayAvatarURL, user.id], function(err, result, fields) {
-                    if (err) {
-                      cb(err);
-                    } else {
-                      cb(null, result);
-                    }
-                  });
-                },
-                function avatar(cb) {
-                  async.waterfall([
-                      function(cb) {
-                        con.query("SELECT AvatarUrl, AvatarPath FROM users WHERE UserId = ?", user.id, function(err, result, fields) {
-                          if (err) {
-                            cb(err);
-                          } else {
-                            //console.log(result);
-                            var currentPath = result[0].AvatarPath;
-                            var newPath;
-                            if (currentPath === null) {
-                              //console.log("e null");
-                              newPath = path.resolve(avatarPath + "-0000" + ".png");
-                            } else if (result[0].AvatarUrl !== user.displayAvatarURL) {
-                              //console.log("sono entrato perchè server = " + result[0].AvatarUrl + " e db = " + avatarUrl + "e userid" + userId);
-                              newPath = path.resolve(avatarPath + "-" + ((parseInt((currentPath.substr(currentPath.length - 8)).substr(0, 4)) + 1).toString().padStart(4, "0")) + ".png");
-                            } else {
-                              //console.log(   ((parseInt((currentPath.substr(currentPath.length - 8)).substr(0,4)) + 1).toString().padStart(4, "0"))   );
-                              newPath = "unchanged";
-                            }
-                            cb(null, newPath);
-                          }
-                        });
-                      },
-                      function(path, cb) {
-                        if (!(path === "unchanged")) {
-                          con.query("UPDATE users SET AvatarUrl = ?, AvatarPath = ? WHERE UserId = ?", [user.displayAvatarURL, path, user.id], function(err, result, fields) {
-                            if (err) {
-                              cb(err);
-                            } else {
-                              download(path, user.displayAvatarURL);
-                              console.log("aggiornato");
-                              cb(null, result);
-                            }
-                          });
-                        } else {
-                          cb(null, 'unchanged');
-                        }
-                      }
-                    ],
-                    function(err, result) {
-                      if (err) {
-                        cb(err);
-                      } else {
-                        //console.log("ho tornato");
-                        cb(null, result);
-                      }
-                    });
-                }
-              ],
-              function(err, result) {
-                if (err) {
-                  cb(err);
-                } else {
-                  //console.log("bnanai");
-                  cb(null, result);
-                }
-              });
+            handleUsers(user, function(err, result) {
+              if (err) {
+                cb(err);
+              } else {
+                cb(null, result);
+              }
+            });
           },
           function(err, result) {
             if (err) {
@@ -231,39 +242,93 @@ function populatedb(cb) {
     });
 }
 
-function processMsg(msg, cb){
+function processMsg(msg, cb) {
   if (msg.attachments.array().length > 0) {
     var filenameext = msg.attachments.first().filename;
     var n = filenameext.lastIndexOf(".");
-    var attachPath = path.resolve(__dirname, './attachments', (filenameext.substring(0,n)+ "-" + msg.attachments.first().id.toString() +filenameext.substring(n)));
+    var attachPath = path.resolve(__dirname, './attachments', (filenameext.substring(0, n) + "-" + msg.attachments.first().id.toString() + filenameext.substring(n)));
     console.log(attachPath);
-    async.series([
-        function(cb) {
-          con.query("INSERT INTO attachments (AttachmentId, Path) VALUES (?, ?)", [msg.attachments.first().id, attachPath ], function(err, result, fields) {
-            if (err) {
-              cb(err);
-            } else {
-              cb(null, result);
-            }
-          });
-        },
-        function(cb) {
-          con.query("INSERT INTO messages (MessageId, UserId, Content, Timestamp, AttachmentId, ChannelId ) VALUES (?, ?, ?, ?, ?, ?)", [msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.attachments.first().id, msg.channel.id], function(err, result, fields) {
-            if (err) {
-              cb(err);
-            } else {
-              cb(null, result);
-            }
-          });
-        }
-      ],
-      function messageAttach(err, result) {
+    if (msg.channel.type === 'text') {
+      con.query("INSERT INTO attachments (AttachmentId, Path) VALUES (?, ?); INSERT INTO messages (MessageId, UserId, Content, Timestamp, AttachmentId, ChannelId ) VALUES (?, ?, ?, ?, ?, ?) ", [msg.attachments.first().id, attachPath, msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.attachments.first().id, msg.channel.id], function(err, result, fields) {
         if (err) {
           cb(err);
         } else {
-          cb(null, 'doneMessageWithAttach');
+          cb(null, 'doneWithAttachText');
         }
       });
+    } else if (msg.channel.type === 'dm') {
+      async.series([
+          function(cb) {
+            handleUsers(msg.channel.recipient, function(err, result) {
+              if (err) {
+                cb(err);
+              } else {
+                cb(null, result);
+              }
+            });
+          },
+          function(cb) {
+            con.query("INSERT INTO attachments (AttachmentId, Path) VALUES (?, ?); INSERT INTO dmchannels (DmChannelId, UserId) SELECT * FROM (SELECT ?, ?) AS tmp WHERE NOT EXISTS (SELECT DmChannelId FROM dmchannels WHERE DmChannelId = ? ) LIMIT 1; INSERT INTO dms (DmId, Content, Timestamp, AttachmentId, DmChannelId ) VALUES (?, ?, ?, ?, ?)",
+            [msg.attachments.first().id, attachPath, msg.channel.id, msg.channel.recipient.id, msg.channel.id, msg.id, msg.cleanContent, msg.createdTimestamp, msg.attachments.first().id, msg.channel.id],
+              function(err, result, fields) {
+                if (err) {
+                  cb(err);
+                } else {
+                  cb(null, result);
+                }
+              });
+          }
+        ],
+        function doneWithAttachDm(err, result) {
+          if (err) {
+            cb(err);
+          } else {
+            cb(null, 'doneWithAttachDm');
+          }
+        }
+      );
+    }
+  }
+  else {
+    if (msg.channel.type === 'text') {
+      con.query("INSERT INTO messages (MessageId, UserId, Content, Timestamp, ChannelId ) VALUES (?, ?, ?, ?, ?, ?) ", [msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.channel.id], function(err, result, fields) {
+        if (err) {
+          cb(err);
+        } else {
+          cb(null, 'doneWithMexText');
+        }
+      });
+    } else if (msg.channel.type === 'dm') {
+      async.series([
+          function(cb) {
+            handleUsers(msg.channel.recipient, function(err, result) {
+              if (err) {
+                cb(err);
+              } else {
+                cb(null, result);
+              }
+            });
+          },
+          function(cb) {
+            con.query("INSERT INTO dmchannels (DmChannelId, UserId) SELECT * FROM (SELECT ?, ?) AS tmp WHERE NOT EXISTS (SELECT DmChannelId FROM dmchannels WHERE DmChannelId = ? ) LIMIT 1; INSERT INTO dms (DmId, Content, Timestamp, DmChannelId ) VALUES (?, ?, ?, ?)", [ msg.channel.id, msg.channel.recipient.id, msg.channel.id, msg.id, msg.cleanContent, msg.createdTimestamp, msg.channel.id],
+              function(err, result, fields) {
+                if (err) {
+                  cb(err);
+                } else {
+                  cb(null, result);
+                }
+              });
+          }
+        ],
+        function doneWithMexDm(err, result) {
+          if (err) {
+            cb(err);
+          } else {
+            cb(null, 'doneWithMexDm');
+          }
+        }
+      );
+    }
   }
 }
 /*// TODO:
@@ -272,6 +337,7 @@ function processMsg(msg, cb){
 -Se spacy dice forse, spam di @spacy DECIDITI!
 -Citazioni;
 -Memebot per Spacy, priority -1;
+- Auto add song playlist yt
 -Bestemmie;
 */
 if (!fs.existsSync(path.resolve(__dirname, './avatars'))) {
@@ -291,21 +357,10 @@ client.on('ready', () => {
 
 client.on('message', msg => {
   if (dbdone) {
-    processMsg(msg, function(err, result){
-      //console.log(result);
+    processMsg(msg, function(err, result) {
+      console.log(result);
     });
-    /*console.log(msg.attachments.array().length);
-    if (msg.attachments.array().length > 0) {
-      console.log(msg.attachments.first().filename);
-    }*/
-    //escapeqry("INSERT INTO attachments(AttachmentId)")
     //escapeqry("INSERT INTO messages (MessageId, UserId, Content, Timestamp, AttachmentId, ChannelId ) VALUES (?, ?, ?, ?, ?, ?)", [msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.attachments.first().id, msg.channel.id]);
-    var lulz = msg.author.id;
-    var lulz2 = msg.author.discriminator;
-    var lulz3 = msg.author.username;
-    var lulz4 = msg.author.tag;
-    var lulz5 = msg.channel.name;
-    var lulz6 = msg.channel.id;
     console.log(msg.content);
     //msg.reply(lulz);
   }
@@ -316,7 +371,5 @@ client.on('messageUpdate', function(messageold, msgnew) {
     console.log(messageold.id, msgnew.id);
   }
 });
-
-//TODO ATTACHMENTS?!!! COME LI GESTISCI?
 
 client.login(token);

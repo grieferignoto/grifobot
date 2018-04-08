@@ -248,6 +248,7 @@ function processMsg(msg, cb) {
     var n = filenameext.lastIndexOf(".");
     var attachPath = path.resolve(__dirname, './attachments', (filenameext.substring(0, n) + "-" + msg.attachments.first().id.toString() + filenameext.substring(n)));
     console.log(attachPath);
+    download(attachPath, msg.attachments.first().url);
     if (msg.channel.type === 'text') {
       con.query("INSERT INTO attachments (AttachmentId, Path) VALUES (?, ?); INSERT INTO messages (MessageId, UserId, Content, Timestamp, AttachmentId, ChannelId ) VALUES (?, ?, ?, ?, ?, ?) ", [msg.attachments.first().id, attachPath, msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.attachments.first().id, msg.channel.id], function(err, result, fields) {
         if (err) {
@@ -342,6 +343,9 @@ function processMsg(msg, cb) {
 */
 if (!fs.existsSync(path.resolve(__dirname, './avatars'))) {
   fs.mkdirSync(path.resolve(__dirname, './avatars'));
+}
+if (!fs.existsSync(path.resolve(__dirname, './attachments'))) {
+  fs.mkdirSync(path.resolve(__dirname, './attachments'));
 }
 
 createdb();

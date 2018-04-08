@@ -97,17 +97,13 @@ async function handleUsers(user, cb) {
                 if (err) {
                   cb(err);
                 } else {
-                  //console.log(result);
                   var currentPath = result[0].AvatarPath;
                   var newPath;
                   if (currentPath === null) {
-                    //console.log("e null");
                     newPath = path.resolve(avatarPath + "-0000" + ".png");
                   } else if (result[0].AvatarUrl !== user.displayAvatarURL) {
-                    //console.log("sono entrato perchè server = " + result[0].AvatarUrl + " e db = " + avatarUrl + "e userid" + userId);
                     newPath = path.resolve(avatarPath + "-" + ((parseInt((currentPath.substr(currentPath.length - 8)).substr(0, 4)) + 1).toString().padStart(4, "0")) + ".png");
                   } else {
-                    //console.log(   ((parseInt((currentPath.substr(currentPath.length - 8)).substr(0,4)) + 1).toString().padStart(4, "0"))   );
                     newPath = "unchanged";
                   }
                   cb(null, newPath);
@@ -134,7 +130,6 @@ async function handleUsers(user, cb) {
             if (err) {
               cb(err);
             } else {
-              //console.log("ho tornato");
               cb(null, result);
             }
           });
@@ -144,7 +139,6 @@ async function handleUsers(user, cb) {
       if (err) {
         cb(err);
       } else {
-        //console.log("bnanai");
         cb(null, result);
       }
     });
@@ -292,7 +286,7 @@ function processMsg(msg, cb) {
   }
   else {
     if (msg.channel.type === 'text') {
-      con.query("INSERT INTO messages (MessageId, UserId, Content, Timestamp, ChannelId ) VALUES (?, ?, ?, ?, ?, ?) ", [msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.channel.id], function(err, result, fields) {
+      con.query("INSERT INTO messages (MessageId, UserId, Content, Timestamp, ChannelId ) VALUES (?, ?, ?, ?, ?) ", [msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.channel.id], function(err, result, fields) {
         if (err) {
           cb(err);
         } else {
@@ -364,7 +358,6 @@ client.on('message', msg => {
     processMsg(msg, function(err, result) {
       console.log(result);
     });
-    //escapeqry("INSERT INTO messages (MessageId, UserId, Content, Timestamp, AttachmentId, ChannelId ) VALUES (?, ?, ?, ?, ?, ?)", [msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.attachments.first().id, msg.channel.id]);
     console.log(msg.content);
     //msg.reply(lulz);
   }

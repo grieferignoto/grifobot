@@ -66,6 +66,7 @@ function download(file_savedest, url) { //https://stackoverflow.com/questions/10
 }
 
 function createdb() {
+  //Multiple statements query to ensure synchrony
   qry("CREATE DATABASE IF NOT EXISTS discordlog CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
   qry("USE discordlog");
   qry("CREATE TABLE IF NOT EXISTS guilds (GuildId bigint, Name nvarchar(102), Available boolean, PRIMARY KEY (GuildId))");
@@ -74,8 +75,10 @@ function createdb() {
   qry("CREATE TABLE IF NOT EXISTS users (UserId bigint, Tag nvarchar(40), Bot boolean, AvatarUrl nvarchar(10000), AvatarPath nvarchar(500), Edited boolean, PRIMARY KEY (UserId))", 4);
   qry("CREATE TABLE IF NOT EXISTS dmchannels(DmChannelId bigint, UserId bigint, PRIMARY KEY(DmChannelId), FOREIGN KEY (UserId) REFERENCES users(UserId))", 5);
   qry("CREATE TABLE IF NOT EXISTS attachments(AttachmentId bigint, Path nvarchar(500), PRIMARY KEY (AttachmentId))", 6);
-  qry("CREATE TABLE IF NOT EXISTS dms(DmId bigint, Content nvarchar(2010), Timestamp bigint, AttachmentId bigint, DmChannelId bigint, PRIMARY KEY (DmId), FOREIGN KEY (DmChannelId) REFERENCES dmchannels (DmChannelId), FOREIGN KEY (AttachmentId) REFERENCES attachments(AttachmentId))", 7);
-  qry("CREATE TABLE IF NOT EXISTS messages (MessageId bigint, UserId bigint, Content nvarchar(2010), Timestamp bigint, AttachmentId bigint, ChannelId bigint, PRIMARY KEY (MessageId), FOREIGN KEY (UserId) REFERENCES users(UserId), FOREIGN KEY (AttachmentId) REFERENCES attachments(AttachmentId), FOREIGN KEY (ChannelId) REFERENCES channels(ChannelId))", 8);
+  qry("CREATE TABLE IF NOT EXISTS dms(DmId bigint, Content nvarchar(2010), Timestamp bigint, AttachmentId bigint, DmChannelId bigint, Edited boolean, PRIMARY KEY (DmId), FOREIGN KEY (DmChannelId) REFERENCES dmchannels (DmChannelId), FOREIGN KEY (AttachmentId) REFERENCES attachments(AttachmentId))", 7);
+  qry("CREATE TABLE IF NOT EXISTS messages (MessageId bigint, UserId bigint, Content nvarchar(2010), Timestamp bigint, AttachmentId bigint, ChannelId bigint, Edited boolean, PRIMARY KEY (MessageId), FOREIGN KEY (UserId) REFERENCES users(UserId), FOREIGN KEY (AttachmentId) REFERENCES attachments(AttachmentId), FOREIGN KEY (ChannelId) REFERENCES channels(ChannelId))", 8);
+  qry("CREATE TABLE IF NOT EXISTS messages_edits (MexEditId bigint NOT NULL AUTO_INCREMENT, OldContent nvarchar(2010), NewContent nvarchar(2010), Timestamp bigint, MessageId bigint, PRIMARY KEY (MexEditId), FOREIGN KEY (MessageId) REFERENCES messages(MessageId))");
+  qry("CREATE TABLE IF NOT EXISTS dms_edits (DmEditId bigint NOT NULL AUTO_INCREMENT, OldContent nvarchar(2010), NewContent nvarchar(2010), Timestamp bigint, DmId bigint, PRIMARY KEY (DmEditId), FOREIGN KEY (DmId) REFERENCES dms(DmId))");
 }
 
 async function handleUsers(user, cb) {
@@ -126,11 +129,11 @@ async function handleUsers(user, cb) {
               }
             }
           ],
-          function(err, result) {
+          function donewithAvatar(err, result) {
             if (err) {
               cb(err);
             } else {
-              cb(null, result);
+              cb(null, "doneWithAvatar");
             }
           });
       }
@@ -139,7 +142,7 @@ async function handleUsers(user, cb) {
       if (err) {
         cb(err);
       } else {
-        cb(null, result);
+        cb(null, "doneWithUser");
       }
     });
 }
@@ -237,6 +240,7 @@ function populatedb(cb) {
 }
 
 function processMsg(msg, cb) {
+  /*IF MESSAGE HAS AN ATTACHMENT*/
   if (msg.attachments.array().length > 0) {
     var filenameext = msg.attachments.first().filename;
     var n = filenameext.lastIndexOf(".");
@@ -263,8 +267,7 @@ function processMsg(msg, cb) {
             });
           },
           function(cb) {
-            con.query("INSERT INTO attachments (AttachmentId, Path) VALUES (?, ?); INSERT INTO dmchannels (DmChannelId, UserId) SELECT * FROM (SELECT ?, ?) AS tmp WHERE NOT EXISTS (SELECT DmChannelId FROM dmchannels WHERE DmChannelId = ? ) LIMIT 1; INSERT INTO dms (DmId, Content, Timestamp, AttachmentId, DmChannelId ) VALUES (?, ?, ?, ?, ?)",
-            [msg.attachments.first().id, attachPath, msg.channel.id, msg.channel.recipient.id, msg.channel.id, msg.id, msg.cleanContent, msg.createdTimestamp, msg.attachments.first().id, msg.channel.id],
+            con.query("INSERT INTO attachments (AttachmentId, Path) VALUES (?, ?); INSERT INTO dmchannels (DmChannelId, UserId) SELECT * FROM (SELECT ?, ?) AS tmp WHERE NOT EXISTS (SELECT DmChannelId FROM dmchannels WHERE DmChannelId = ? ) LIMIT 1; INSERT INTO dms (DmId, Content, Timestamp, AttachmentId, DmChannelId ) VALUES (?, ?, ?, ?, ?)", [msg.attachments.first().id, attachPath, msg.channel.id, msg.channel.recipient.id, msg.channel.id, msg.id, msg.cleanContent, msg.createdTimestamp, msg.attachments.first().id, msg.channel.id],
               function(err, result, fields) {
                 if (err) {
                   cb(err);
@@ -284,9 +287,10 @@ function processMsg(msg, cb) {
       );
     }
   }
+  /*IF MESSAGE DOESN'T HAVE AN ATTACHMENT*/
   else {
     if (msg.channel.type === 'text') {
-      con.query("INSERT INTO messages (MessageId, UserId, Content, Timestamp, ChannelId ) VALUES (?, ?, ?, ?, ?) ", [msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.channel.id], function(err, result, fields) {
+      con.query("INSERT INTO messages (MessageId, UserId, Content, Timestamp, ChannelId ) VALUES (?, ?, ?, ?, ?)", [msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.channel.id], function(err, result, fields) {
         if (err) {
           cb(err);
         } else {
@@ -305,7 +309,7 @@ function processMsg(msg, cb) {
             });
           },
           function(cb) {
-            con.query("INSERT INTO dmchannels (DmChannelId, UserId) SELECT * FROM (SELECT ?, ?) AS tmp WHERE NOT EXISTS (SELECT DmChannelId FROM dmchannels WHERE DmChannelId = ? ) LIMIT 1; INSERT INTO dms (DmId, Content, Timestamp, DmChannelId ) VALUES (?, ?, ?, ?)", [ msg.channel.id, msg.channel.recipient.id, msg.channel.id, msg.id, msg.cleanContent, msg.createdTimestamp, msg.channel.id],
+            con.query("INSERT INTO dmchannels (DmChannelId, UserId) SELECT * FROM (SELECT ?, ?) AS tmp WHERE NOT EXISTS (SELECT DmChannelId FROM dmchannels WHERE DmChannelId = ? ) LIMIT 1; INSERT INTO dms (DmId, Content, Timestamp, DmChannelId ) VALUES (?, ?, ?, ?)", [msg.channel.id, msg.channel.recipient.id, msg.channel.id, msg.id, msg.cleanContent, msg.createdTimestamp, msg.channel.id],
               function(err, result, fields) {
                 if (err) {
                   cb(err);
@@ -326,7 +330,67 @@ function processMsg(msg, cb) {
     }
   }
 }
-/*// TODO:
+
+function updateMessage(oldmsg, newmsg, cb) {
+  if (newmsg.channel.type === 'text') {
+    async.parallel([
+        function updateMex(cb) {
+          con.query("UPDATE messages SET Content = ?, Edited = 1 WHERE MessageId = ?", [newmsg.cleanContent, oldmsg.id], function(err, result, fields) {
+            if (err) {
+              cb(err);
+            } else {
+              cb(null, 'doneWithUpdateMex');
+            }
+          });
+        },
+        function logMexChanges(cb) {
+          con.query("INSERT INTO messages_edits (OldContent, NewContent, Timestamp, MessageId ) VALUES (?, ?, ?, ?)", [oldmsg.cleanContent, newmsg.cleanContent, newmsg.editedTimestamp, newmsg.id], function(err, result, fields) {
+            if (err) {
+              cb(err);
+            } else {
+              cb(null, 'doneWithLogMexChanges');
+            }
+          });
+        }
+      ],
+      function doneWithMexUpdate(err, result) {
+        if (err) {
+          cb(err);
+        } else {
+          cb(null, result);
+        }
+      });
+  } else if (newmsg.channel.type === 'dm') {
+    async.parallel([
+        function updateDm(cb) {
+          con.query("UPDATE dms SET Content = ?, Edited = 1 WHERE DmId = ?", [newmsg.cleanContent, oldmsg.id], function(err, result, fields) {
+            if (err) {
+              cb(err);
+            } else {
+              cb(null, 'doneWithUpdateDm');
+            }
+          });
+        },
+        function logDmChanges(cb) {
+          con.query("INSERT INTO dms_edits (OldContent, NewContent, Timestamp, DmId ) VALUES (?, ?, ?, ?)", [oldmsg.cleanContent, newmsg.cleanContent, newmsg.editedTimestamp, newmsg.id], function(err, result, fields) {
+            if (err) {
+              cb(err);
+            } else {
+              cb(null, 'doneWithLogDmChanges');
+            }
+          });
+        }
+      ],
+      function doneWithDmUpdate(err, result) {
+        if (err) {
+          cb(err);
+        } else {
+          cb(null, result);
+        }
+      });
+  }
+}
+/* TODO:
 -Se Gabri manda più di x messaggi più corti di y lettere in z tempo,  KICK ABBUSO PORKADDIO;
 -Chat Log;
 -Se spacy dice forse, spam di @spacy DECIDITI!
@@ -335,6 +399,7 @@ function processMsg(msg, cb) {
 - Auto add song playlist yt
 -Bestemmie;
 */
+
 if (!fs.existsSync(path.resolve(__dirname, './avatars'))) {
   fs.mkdirSync(path.resolve(__dirname, './avatars'));
 }
@@ -344,29 +409,65 @@ if (!fs.existsSync(path.resolve(__dirname, './attachments'))) {
 
 createdb();
 
+/*EVENTS TO HANDLE
+  channelCreate
+  channelDelete
+  channelUpdate ----
+  guildCreate
+  guildDelete
+  guildMemberAdd
+  guildUpdate ----
+  guildMemberUpdate ???
+  guildUpdate ----
+  message
+  messageDelete
+  messageDeleteBulk
+  messageUpdate
+  ready
+  resume
+  userUpdate ???
+*/
 
 client.on('ready', () => {
   console.log(`Logged in as ${client.user.tag}!`);
   populatedb(function(err, result) {
-    //console.log(result);
+    dbdone = true;
   });
-  dbdone = true;
 });
 
 client.on('message', msg => {
   if (dbdone) {
+    console.log(msg.content);
     processMsg(msg, function(err, result) {
       console.log(result);
     });
-    console.log(msg.content);
-    //msg.reply(lulz);
+  } else {
+    console.log("DB not ready");
   }
 });
 
-client.on('messageUpdate', function(messageold, msgnew) {
+client.on('messageUpdate', function(oldmsg, newmsg) {
   if (dbdone) {
-    console.log(messageold.id, msgnew.id);
+    updateMessage(oldmsg, newmsg, function(err, result) {
+      console.log(result);
+    });
   }
+});
+
+client.on('channelUpdate', function(oldmsg, newmsg) {
+  console.log("Fired channelUpdate");
+});
+
+client.on('guildMemberAdd', function(oldmsg, newmsg) {
+  console.log("Fired guildMemberAdd");
+});
+
+client.on('guildMemberUpdate', function(oldmsg, newmsg) {
+  console.log("Fired guildMemberUpdate");
+});
+
+client.on('userUpdate', function(oldmsg, newmsg) {
+  console.log("Fired userUpdate");
 });
 
 client.login(token);

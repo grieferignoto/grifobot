@@ -10,10 +10,11 @@ const path = require('path');
 var dbdone = false;
 
 var con = mysql.createConnection({
-  host: "localhost",
-  user: "root",
-  password: "",
-  multipleStatements: true
+  host: "192.168.1.166",
+  user: "griefer",
+  password: "porcodio",
+  multipleStatements: true,
+  charset: "utf8mb4_unicode_520_ci"
 });
 
 con.connect(function(err) {
@@ -67,7 +68,7 @@ function download(file_savedest, url) { //https://stackoverflow.com/questions/10
 
 function createdb() {
   //Multiple statements query to ensure synchrony
-  qry("CREATE DATABASE IF NOT EXISTS discordlog CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+  qry("CREATE DATABASE IF NOT EXISTS discordlog DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_unicode_520_ci");
   qry("USE discordlog");
   qry("CREATE TABLE IF NOT EXISTS guilds (GuildId bigint, Name nvarchar(102), Available boolean, PRIMARY KEY (GuildId))");
   qry("CREATE TABLE IF NOT EXISTS categories (CategoryId bigint, Name nvarchar(102), GuildId bigint, PRIMARY KEY (CategoryId), FOREIGN KEY (GuildId) REFERENCES guilds(GuildId))", 2);
@@ -75,8 +76,8 @@ function createdb() {
   qry("CREATE TABLE IF NOT EXISTS users (UserId bigint, Tag nvarchar(40), Bot boolean, AvatarUrl nvarchar(10000), AvatarPath nvarchar(500), Edited boolean, PRIMARY KEY (UserId))", 4);
   qry("CREATE TABLE IF NOT EXISTS dmchannels(DmChannelId bigint, UserId bigint, PRIMARY KEY(DmChannelId), FOREIGN KEY (UserId) REFERENCES users(UserId))", 5);
   qry("CREATE TABLE IF NOT EXISTS attachments(AttachmentId bigint, Path nvarchar(500), PRIMARY KEY (AttachmentId))", 6);
-  qry("CREATE TABLE IF NOT EXISTS dms(DmId bigint, Content nvarchar(2010), Timestamp bigint, AttachmentId bigint, DmChannelId bigint, Edited boolean, PRIMARY KEY (DmId), FOREIGN KEY (DmChannelId) REFERENCES dmchannels (DmChannelId), FOREIGN KEY (AttachmentId) REFERENCES attachments(AttachmentId))", 7);
-  qry("CREATE TABLE IF NOT EXISTS messages (MessageId bigint, UserId bigint, Content nvarchar(2010), Timestamp bigint, AttachmentId bigint, ChannelId bigint, Edited boolean, PRIMARY KEY (MessageId), FOREIGN KEY (UserId) REFERENCES users(UserId), FOREIGN KEY (AttachmentId) REFERENCES attachments(AttachmentId), FOREIGN KEY (ChannelId) REFERENCES channels(ChannelId))", 8);
+  qry("CREATE TABLE IF NOT EXISTS dms(DmId bigint, Content varchar(2010), Timestamp bigint, AttachmentId bigint, DmChannelId bigint, Edited boolean, PRIMARY KEY (DmId), FOREIGN KEY (DmChannelId) REFERENCES dmchannels (DmChannelId), FOREIGN KEY (AttachmentId) REFERENCES attachments(AttachmentId))", 7);
+  qry("CREATE TABLE IF NOT EXISTS messages (MessageId bigint, UserId bigint, Content varchar(2010), Timestamp bigint, AttachmentId bigint, ChannelId bigint, Edited boolean, PRIMARY KEY (MessageId), FOREIGN KEY (UserId) REFERENCES users(UserId), FOREIGN KEY (AttachmentId) REFERENCES attachments(AttachmentId), FOREIGN KEY (ChannelId) REFERENCES channels(ChannelId))", 8);
   qry("CREATE TABLE IF NOT EXISTS messages_edits (MexEditId bigint NOT NULL AUTO_INCREMENT, OldContent nvarchar(2010), NewContent nvarchar(2010), Timestamp bigint, MessageId bigint, PRIMARY KEY (MexEditId), FOREIGN KEY (MessageId) REFERENCES messages(MessageId))");
   qry("CREATE TABLE IF NOT EXISTS dms_edits (DmEditId bigint NOT NULL AUTO_INCREMENT, OldContent nvarchar(2010), NewContent nvarchar(2010), Timestamp bigint, DmId bigint, PRIMARY KEY (DmEditId), FOREIGN KEY (DmId) REFERENCES dms(DmId))");
 }
@@ -239,7 +240,7 @@ function populatedb(cb) {
     });
 }
 
-function processMsg(msg, cb) {
+async function processMsg(msg, cb) {
   /*IF MESSAGE HAS AN ATTACHMENT*/
   if (msg.attachments.array().length > 0) {
     var filenameext = msg.attachments.first().filename;
@@ -312,6 +313,7 @@ function processMsg(msg, cb) {
             con.query("INSERT INTO dmchannels (DmChannelId, UserId) SELECT * FROM (SELECT ?, ?) AS tmp WHERE NOT EXISTS (SELECT DmChannelId FROM dmchannels WHERE DmChannelId = ? ) LIMIT 1; INSERT INTO dms (DmId, Content, Timestamp, DmChannelId ) VALUES (?, ?, ?, ?)", [msg.channel.id, msg.channel.recipient.id, msg.channel.id, msg.id, msg.cleanContent, msg.createdTimestamp, msg.channel.id],
               function(err, result, fields) {
                 if (err) {
+                  console.log(err);
                   cb(err);
                 } else {
                   cb(null, result);
@@ -437,10 +439,14 @@ client.on('ready', () => {
 
 client.on('message', msg => {
   if (dbdone) {
-    console.log(msg.content);
+    // USEFUL https://www.npmjs.com/package/string-escape
     processMsg(msg, function(err, result) {
-      console.log(result);
-    });
+     if (err) {
+       console.log(err);
+     } else {
+       console.log(result);
+     }
+   });
   } else {
     console.log("DB not ready");
   }
@@ -458,12 +464,10 @@ client.on('channelUpdate', function(oldmsg, newmsg) {
   console.log("Fired channelUpdate");
 });
 
-client.on('guildMemberAdd', function(oldmsg, newmsg) {
-  console.log("Fired guildMemberAdd");
-});
-
-client.on('guildMemberUpdate', function(oldmsg, newmsg) {
-  console.log("Fired guildMemberUpdate");
+client.on('guildMemberAdd', function(member) {
+  handleUsers(member.user, function(err, result) {
+    console.log(result);
+  });
 });
 
 client.on('userUpdate', function(oldmsg, newmsg) {

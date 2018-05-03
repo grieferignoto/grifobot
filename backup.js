@@ -31,6 +31,40 @@ con.query("INSERT INTO users (UserId , Tag, Bot, AvatarUrl, Edited) SELECT * FRO
   });
 });
 
+/*async.series([
+    async function processa(cb) {
+       await processMsg(msg, function(err, result) {
+        if (err) {
+          cb(err);
+        } else {
+          cb(null, result);
+        }
+      });
+    },
+    function rispondi(cb) {
+      if (!msg.author.bot) {
+        con.query("SELECT Content FROM messages WHERE MessageId = ?", msg.id, function(err, result, fields) {
+          if (err) {
+            cb(err);
+          } else {
+            msg.reply(result[0].Content)
+              .then(sent => console.log(`Sent a reply to ${sent.author.username}`))
+              .catch(console.error);
+            cb(null, 'appo2');
+          }
+        });
+      } else {
+        cb(null, 'booat');
+      }
+    }
+  ],
+  function doneWithReply(err, result) {
+    if (err) console.log(err)
+    else console.log('result');
+  });*/
+
+
+
 /*var guilds = client.guilds.array();
 for (var i = 0, len = guilds.length; i < len; i++) {
   if (guilds[i].available) {

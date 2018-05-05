@@ -70,16 +70,16 @@ function createdb() {
   //Multiple statements query to ensure synchrony
   qry("CREATE DATABASE IF NOT EXISTS discordlog DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_unicode_520_ci");
   qry("USE discordlog");
-  qry("CREATE TABLE IF NOT EXISTS guilds (GuildId bigint, Name nvarchar(102), Available boolean, PRIMARY KEY (GuildId))");
-  qry("CREATE TABLE IF NOT EXISTS categories (CategoryId bigint, Name nvarchar(102), GuildId bigint, PRIMARY KEY (CategoryId), FOREIGN KEY (GuildId) REFERENCES guilds(GuildId))", 2);
-  qry("CREATE TABLE IF NOT EXISTS channels (ChannelId bigint, Name nvarchar(102), Type varchar(10), CategoryId bigint, GuildId bigint, PRIMARY KEY (ChannelId), FOREIGN KEY (CategoryId) REFERENCES categories(CategoryId), FOREIGN KEY (GuildId) REFERENCES guilds(GuildId))", 3);
-  qry("CREATE TABLE IF NOT EXISTS users (UserId bigint, Tag nvarchar(40), Bot boolean, AvatarUrl nvarchar(10000), AvatarPath nvarchar(500), Edited boolean, PRIMARY KEY (UserId))", 4);
+  qry("CREATE TABLE IF NOT EXISTS guilds (GuildId bigint, Name varchar(102), Available boolean, PRIMARY KEY (GuildId))");
+  qry("CREATE TABLE IF NOT EXISTS categories (CategoryId bigint, Name varchar(102), GuildId bigint, PRIMARY KEY (CategoryId), FOREIGN KEY (GuildId) REFERENCES guilds(GuildId))", 2);
+  qry("CREATE TABLE IF NOT EXISTS channels (ChannelId bigint, Name varchar(102), Type varchar(10), CategoryId bigint, GuildId bigint, PRIMARY KEY (ChannelId), FOREIGN KEY (CategoryId) REFERENCES categories(CategoryId), FOREIGN KEY (GuildId) REFERENCES guilds(GuildId))", 3);
+  qry("CREATE TABLE IF NOT EXISTS users (UserId bigint, Tag varchar(40), Bot boolean, AvatarUrl varchar(10000), AvatarPath varchar(500), Edited boolean, PRIMARY KEY (UserId))", 4);
   qry("CREATE TABLE IF NOT EXISTS dmchannels(DmChannelId bigint, UserId bigint, PRIMARY KEY(DmChannelId), FOREIGN KEY (UserId) REFERENCES users(UserId))", 5);
-  qry("CREATE TABLE IF NOT EXISTS attachments(AttachmentId bigint, Path nvarchar(500), PRIMARY KEY (AttachmentId))", 6);
+  qry("CREATE TABLE IF NOT EXISTS attachments(AttachmentId bigint, Path varchar(500), PRIMARY KEY (AttachmentId))", 6);
   qry("CREATE TABLE IF NOT EXISTS dms(DmId bigint, Content varchar(2010), Timestamp bigint, AttachmentId bigint, DmChannelId bigint, Edited boolean, PRIMARY KEY (DmId), FOREIGN KEY (DmChannelId) REFERENCES dmchannels (DmChannelId), FOREIGN KEY (AttachmentId) REFERENCES attachments(AttachmentId))", 7);
   qry("CREATE TABLE IF NOT EXISTS messages (MessageId bigint, UserId bigint, Content varchar(2010), Timestamp bigint, AttachmentId bigint, ChannelId bigint, Edited boolean, PRIMARY KEY (MessageId), FOREIGN KEY (UserId) REFERENCES users(UserId), FOREIGN KEY (AttachmentId) REFERENCES attachments(AttachmentId), FOREIGN KEY (ChannelId) REFERENCES channels(ChannelId))", 8);
-  qry("CREATE TABLE IF NOT EXISTS messages_edits (MexEditId bigint NOT NULL AUTO_INCREMENT, OldContent nvarchar(2010), NewContent nvarchar(2010), Timestamp bigint, MessageId bigint, PRIMARY KEY (MexEditId), FOREIGN KEY (MessageId) REFERENCES messages(MessageId))");
-  qry("CREATE TABLE IF NOT EXISTS dms_edits (DmEditId bigint NOT NULL AUTO_INCREMENT, OldContent nvarchar(2010), NewContent nvarchar(2010), Timestamp bigint, DmId bigint, PRIMARY KEY (DmEditId), FOREIGN KEY (DmId) REFERENCES dms(DmId))");
+  qry("CREATE TABLE IF NOT EXISTS messages_edits (MexEditId bigint NOT NULL AUTO_INCREMENT, OldContent varchar(2010), NewContent varchar(2010), Timestamp bigint, MessageId bigint, PRIMARY KEY (MexEditId), FOREIGN KEY (MessageId) REFERENCES messages(MessageId))");
+  qry("CREATE TABLE IF NOT EXISTS dms_edits (DmEditId bigint NOT NULL AUTO_INCREMENT, OldContent varchar(2010), NewContent varchar(2010), Timestamp bigint, DmId bigint, PRIMARY KEY (DmEditId), FOREIGN KEY (DmId) REFERENCES dms(DmId))");
 }
 
 async function handleUsers(user, cb) {
@@ -374,10 +374,12 @@ function updateMessage(oldmsg, newmsg, cb) {
           });
         },
         function logDmChanges(cb) {
-          con.query("INSERT INTO dms_edits (OldContent, NewContent, Timestamp, DmId ) VALUES (?, ?, ?, ?)", [oldmsg.cleanContent, newmsg.cleanContent, newmsg.editedTimestamp, newmsg.id], function(err, result, fields) {
+          con.query("INSERT INTO dms_edits (OldContent, NewContent, Timestamp, DmId ) VALUES (?, ?, ?, ?)", [oldmsg.cleanContent, newmsg.cleanContent, newmsg.editedTimestamp, newmsg.id], function(err, result) {
             if (err) {
+              console.log(err);
               cb(err);
             } else {
+              console.log("avorio");
               cb(null, 'doneWithLogDmChanges');
             }
           });
@@ -393,6 +395,7 @@ function updateMessage(oldmsg, newmsg, cb) {
   }
 }
 /* TODO:
+-SETTARE A 500 LE CLIENT OPTIONS PER I MESSAGE LIFETIME;
 -Se Gabri manda più di x messaggi più corti di y lettere in z tempo,  KICK ABBUSO PORKADDIO;
 -Chat Log;
 -Se spacy dice forse, spam di @spacy DECIDITI!
@@ -429,6 +432,11 @@ createdb();
   resume
   userUpdate ???
 */
+client.on('channelCreate', channel =>{
+  if (dbdone){
+
+  }
+} );
 
 client.on('ready', () => {
   console.log(`Logged in as ${client.user.tag}!`);
@@ -439,7 +447,6 @@ client.on('ready', () => {
 
 client.on('message', msg => {
   if (dbdone) {
-    // USEFUL https://www.npmjs.com/package/string-escape
     processMsg(msg, function(err, result) {
      if (err) {
        console.log(err);

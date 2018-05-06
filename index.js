@@ -14,11 +14,11 @@ var pool;
 function parallelqry(connector, query, params) {
   return new Promise(function(resolve, reject) {
     connector.query(query, params)
-      .then(results => {
+      .then(function(results){
         resolve(results);
       })
       .catch(err => {
-        console.log(err);
+        console.error(err);
         reject(err);
       });
   });
@@ -120,7 +120,9 @@ async function handleUsers(user) {
         conn = connection;
         parallelqry(conn, "INSERT INTO users (UserId , Tag, Bot, AvatarUrl, Edited) SELECT * FROM (SELECT ?, ?, ?, ?, 0 ) AS tmp WHERE NOT EXISTS (SELECT UserId FROM users WHERE UserId = ? ) LIMIT 1;", [user.id, user.tag, user.bot, user.displayAvatarURL, user.id])
       })
-      .then(() => parallelqry(conn, "SELECT AvatarUrl, AvatarPath FROM users WHERE UserId = ?", user.id))
+      .then(function() {
+         return parallelqry(conn, "SELECT AvatarUrl, AvatarPath FROM users WHERE UserId = ?", user.id);
+      })
       .then(results => {
         let currentPath = results[0].AvatarPath;
         let newPath;
@@ -133,11 +135,10 @@ async function handleUsers(user) {
           newPath = "unchanged";
 
         if (newPath !== "unchanged") {
-          parallelqry(conn, "UPDATE users SET AvatarUrl = ?, AvatarPath = ? WHERE UserId = ?", [user.displayAvatarURL, newPath, user.id])
+          return parallelqry(conn, "UPDATE users SET AvatarUrl = ?, AvatarPath = ? WHERE UserId = ?", [user.displayAvatarURL, newPath, user.id])
             .then(function() {
               download(newPath, user.displayAvatarURL);
-              console.log("aggiornato");
-              return 'aggiornato12';
+              return 'aggiornato';
             })
             .catch(err => {
               console.log(err);
@@ -148,7 +149,6 @@ async function handleUsers(user) {
         }
       })
       .then(status => {
-        console.log("status: " + status);
         if (status !== 'err') {
           resolve(status);
         } else {
@@ -168,30 +168,29 @@ async function handleUsers(user) {
 
 function populatedb() {
   return new Promise(function(resolve, reject) {
-    var users = client.users.array();
-    var guilds = client.guilds.array();
-    var channels = client.channels.array();
+    var client_users = client.users.array();
+    var client_guilds = client.guilds.array();
+    var client_channels = client.channels.array();
     var conn;
     pool.getConnection()
       .then(connection => {
         conn = connection;
       })
-      .then(function utenti() {
-        for (let i = 0; i < users.length; i++) {
-          console.log(i, users[i]);
-          handleUsers(users[i]);
+      .then(async function users() {
+        for (let i = 0; i < client_users.length; i++) {
+          await handleUsers(client_users[i]);
         }
       })
       .then(function guilds() {
-        for (let i = 0; i < guilds.length; i++) {
-          guild = guilds[i];
+        for (let i = 0; i < client_guilds.length; i++) {
+          let guild = client_guilds[i];
           if (guild.available)
             parallelqry(conn, "INSERT INTO guilds (GuildId, Name, Available) SELECT * FROM (SELECT ?, ?, 1 ) AS tmp WHERE NOT EXISTS (SELECT GuildId FROM guilds WHERE GuildId = ? ) LIMIT 1;", [guild.id, guild.name, guild.id]);
         }
       })
       .then(function channels() {
-        for (let i = 0; i < channels.length; i++) {
-          channel = channels[i];
+        for (let i = 0; i < client_channels.length; i++) {
+          let channel = client_channels[i];
           if (channel.type === 'category')
             parallelqry(conn, "INSERT INTO categories (CategoryId, Name, GuildId) SELECT * FROM (SELECT ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT CategoryId FROM categories WHERE CategoryId = ? ) LIMIT 1;", [channel.id, channel.name, channel.guild.id, channel.id]);
           else if (channel.type === 'dm')
@@ -216,97 +215,6 @@ function populatedb() {
 }
 
 /*
-function populatedb(cb) {
-  async.parallel([
-      function users(cb) {
-        var users = client.users.array();
-        async.each(users, function(user, cb) {
-            handleUsers(user, function(err, result) {
-              if (err) {
-                cb(err);
-              } else {
-                cb(null, result);
-              }
-            });
-          },
-          function(err, result) {
-            if (err) {
-              cb(err);
-            } else {
-              //console.log("namama");
-              cb(null, 'doneUsers');
-            }
-          });
-      },
-      function guilds(cb) {
-        var guilds = client.guilds.array();
-        async.each(guilds, function(guild, cb) {
-            if (guild.available) {
-              var tempid = guild.id;
-              con.query("INSERT INTO guilds (GuildId, Name, Available) SELECT * FROM (SELECT ?, ?, 1 ) AS tmp WHERE NOT EXISTS (SELECT GuildId FROM guilds WHERE GuildId = ? ) LIMIT 1;", [tempid, guild.name, tempid], function(err, result, fields) {
-                if (err) {
-                  cb(err);
-                } else {
-                  cb(null, result);
-                }
-              });
-            }
-          },
-          function doneGuilds(err, result) {
-            if (err) {
-              cb(err);
-            } else {
-              cb(null, 'doneGuilds');
-            }
-          });
-      },
-      function channels(cb) {
-        var channels = client.channels.array();
-        async.each(channels, function(channel, cb) {
-            if (channel.type === 'category') {
-              con.query("INSERT INTO categories (CategoryId, Name, GuildId) SELECT * FROM (SELECT ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT CategoryId FROM categories WHERE CategoryId = ? ) LIMIT 1;", [channel.id, channel.name, channel.guild.id, channel.id], function(err, result, fields) {
-                if (err) {
-                  cb(err);
-                } else {
-                  cb(null, result);
-                }
-              });
-            } else if (channel.type === 'dm') {
-              con.query("INSERT INTO dmchannels (DmId, UserId) SELECT * FROM (SELECT ?, ? ) AS tmp WHERE NOT EXISTS (SELECT DmId FROM dmchannels WHERE DmId = ? ) LIMIT 1;", [channel.id, channel.recipient.id], function(err, result, fields) {
-                if (err) {
-                  cb(err);
-                } else {
-                  cb(null, result);
-                }
-              });
-            } else {
-              con.query("INSERT INTO channels (ChannelId, Name, Type, CategoryId, GuildId) SELECT * FROM (SELECT ?, ?, ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT ChannelId FROM channels WHERE ChannelId = ? ) LIMIT 1;", [channel.id, channel.name, channel.type, channel.parentID, channel.guild.id, channel.id], function(err, result, fields) {
-                if (err) {
-                  cb(err);
-                } else {
-                  cb(null, result);
-                }
-              });
-            }
-          },
-          function doneChannels(err, result) {
-            if (err) {
-              cb(err);
-            } else {
-              cb(null, 'doneChannels');
-            }
-          });
-      }
-    ],
-    function donewithParallel(err, result) {
-      if (err) {
-        cb(err);
-      } else {
-        console.log(result);
-        cb(null, result);
-      }
-    });
-}
 
 async function processMsg(msg, cb) {
   //IF MESSAGE HAS AN ATTACHMENT

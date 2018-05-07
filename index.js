@@ -207,7 +207,6 @@ function populatedb() {
         resolve('doneWithPopulate');
       })
       .catch(err => {
-        console.log("guild o chann error!!!!!!");
         reject(err);
       })
       .finally(function release() {
@@ -226,14 +225,14 @@ function processMsg(msg) {
       download(attachPath, msg.attachments.first().url);
       if (msg.channel.type === 'text') {
         fastqry("INSERT INTO attachments (AttachmentId, Path) VALUES (?, ?); INSERT INTO messages (MessageId, UserId, Content, Timestamp, AttachmentId, ChannelId ) VALUES (?, ?, ?, ?, ?, ?) ", [msg.attachments.first().id, attachPath, msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.attachments.first().id, msg.channel.id])
-          .then(resolve('doneWithAttachMex'))
+          .then(() => resolve('doneWithAttachMex'))
           .catch(err => reject(err));
       } else if (msg.channel.type === 'dm') {
         handleUsers(msg.channel.recipient)
           .then(() => {
             return fastqry("INSERT INTO attachments (AttachmentId, Path) VALUES (?, ?); INSERT INTO dmchannels (DmChannelId, UserId) SELECT * FROM (SELECT ?, ?) AS tmp WHERE NOT EXISTS (SELECT DmChannelId FROM dmchannels WHERE DmChannelId = ? ) LIMIT 1; INSERT INTO dms (DmId, Content, Timestamp, AttachmentId, DmChannelId ) VALUES (?, ?, ?, ?, ?)", [msg.attachments.first().id, attachPath, msg.channel.id, msg.channel.recipient.id, msg.channel.id, msg.id, msg.cleanContent, msg.createdTimestamp, msg.attachments.first().id, msg.channel.id])
           })
-          .then(resolve('doneWithAttachDm'))
+          .then(() => resolve('doneWithAttachDm'))
           .catch(err => reject(err) );
       }
     } else {

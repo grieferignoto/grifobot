@@ -14,11 +14,11 @@ var pool;
 function parallelqry(connector, query, params) {
   return new Promise(function(resolve, reject) {
     connector.query(query, params)
-      .then(function(results){
+      .then(function(results) {
         resolve(results);
       })
       .catch(err => {
-        console.error(err);
+        //console.error(err);
         reject(err);
       });
   });
@@ -41,7 +41,6 @@ async function fastqry(query, params) {
       })
       .finally(function() {
         connection.release();
-        console.log("connection released");
       });
   });
 }
@@ -121,7 +120,7 @@ async function handleUsers(user) {
         parallelqry(conn, "INSERT INTO users (UserId , Tag, Bot, AvatarUrl, Edited) SELECT * FROM (SELECT ?, ?, ?, ?, 0 ) AS tmp WHERE NOT EXISTS (SELECT UserId FROM users WHERE UserId = ? ) LIMIT 1;", [user.id, user.tag, user.bot, user.displayAvatarURL, user.id])
       })
       .then(function() {
-         return parallelqry(conn, "SELECT AvatarUrl, AvatarPath FROM users WHERE UserId = ?", user.id);
+        return parallelqry(conn, "SELECT AvatarUrl, AvatarPath FROM users WHERE UserId = ?", user.id);
       })
       .then(results => {
         let currentPath = results[0].AvatarPath;
@@ -182,29 +181,33 @@ function populatedb() {
         }
       })
       .then(function guilds() {
+        let promise_guilds = [];
         for (let i = 0; i < client_guilds.length; i++) {
           let guild = client_guilds[i];
           if (guild.available)
-            parallelqry(conn, "INSERT INTO guilds (GuildId, Name, Available) SELECT * FROM (SELECT ?, ?, 1 ) AS tmp WHERE NOT EXISTS (SELECT GuildId FROM guilds WHERE GuildId = ? ) LIMIT 1;", [guild.id, guild.name, guild.id]);
+            promise_guilds.push(parallelqry(conn, "INSERT INTO guilds (GuildId, Name, Available) SELECT * FROM (SELECT ?, ?, 1 ) AS tmp WHERE NOT EXISTS (SELECT GuildId FROM guilds WHERE GuildId = ? ) LIMIT 1;", [guild.id, guild.name, guild.id]));
         }
+        return Promise.all(promise_guilds);
       })
       .then(function channels() {
+        let promise_channels = [];
         for (let i = 0; i < client_channels.length; i++) {
           let channel = client_channels[i];
           if (channel.type === 'category')
-            parallelqry(conn, "INSERT INTO categories (CategoryId, Name, GuildId) SELECT * FROM (SELECT ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT CategoryId FROM categories WHERE CategoryId = ? ) LIMIT 1;", [channel.id, channel.name, channel.guild.id, channel.id]);
+            promise_channels.push(parallelqry(conn, "INSERT INTO categories (CategoryId, Name, GuildId) SELECT * FROM (SELECT ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT CategoryId FROM categories WHERE CategoryId = ? ) LIMIT 1;", [channel.id, channel.name, channel.guild.id, channel.id]));
           else if (channel.type === 'dm')
-            parallelqry(conn, "INSERT INTO dmchannels (DmId, UserId) SELECT * FROM (SELECT ?, ? ) AS tmp WHERE NOT EXISTS (SELECT DmId FROM dmchannels WHERE DmId = ? ) LIMIT 1;", [channel.id, channel.recipient.id]);
+            promise_channels.push(parallelqry(conn, "INSERT INTO dmchannels (DmId, UserId) SELECT * FROM (SELECT ?, ? ) AS tmp WHERE NOT EXISTS (SELECT DmId FROM dmchannels WHERE DmId = ? ) LIMIT 1;", [channel.id, channel.recipient.id]));
           else
-            parallelqry(conn, "INSERT INTO channels (ChannelId, Name, Type, CategoryId, GuildId) SELECT * FROM (SELECT ?, ?, ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT ChannelId FROM channels WHERE ChannelId = ? ) LIMIT 1;", [channel.id, channel.name, channel.type, channel.parentID, channel.guild.id, channel.id]);
+            promise_channels.push(parallelqry(conn, "INSERT INTO channels (ChannelId, Name, Type, CategoryId, GuildId) SELECT * FROM (SELECT ?, ?, ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT ChannelId FROM channels WHERE ChannelId = ? ) LIMIT 1;", [channel.id, channel.name, channel.type, channel.parentID, channel.guild.id, channel.id]));
         }
+        return Promise.all(promise_channels);
       })
       .then(function doneWithPopulate() {
         console.log('doneWithPopulate')
         resolve('doneWithPopulate');
       })
       .catch(err => {
-        console.log("guild o chann error" + err);
+        console.log("guild o chann error!!!!!!");
         reject(err);
       })
       .finally(function release() {
@@ -214,8 +217,43 @@ function populatedb() {
   });
 }
 
-/*
+function processMsg(msg) {
+  return new Promise(function(resolve, reject) {
+    if (msg.attachments.array().length > 0) {
+      var filenameext = msg.attachments.first().filename;
+      var n = filenameext.lastIndexOf(".");
+      var attachPath = path.resolve(__dirname, './attachments', (filenameext.substring(0, n) + "-" + msg.attachments.first().id.toString() + filenameext.substring(n)));
+      download(attachPath, msg.attachments.first().url);
+      if (msg.channel.type === 'text') {
+        fastqry("INSERT INTO attachments (AttachmentId, Path) VALUES (?, ?); INSERT INTO messages (MessageId, UserId, Content, Timestamp, AttachmentId, ChannelId ) VALUES (?, ?, ?, ?, ?, ?) ", [msg.attachments.first().id, attachPath, msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.attachments.first().id, msg.channel.id])
+          .then(resolve('doneWithAttachMex'))
+          .catch(err => reject(err));
+      } else if (msg.channel.type === 'dm') {
+        handleUsers(msg.channel.recipient)
+          .then(() => {
+            return fastqry("INSERT INTO attachments (AttachmentId, Path) VALUES (?, ?); INSERT INTO dmchannels (DmChannelId, UserId) SELECT * FROM (SELECT ?, ?) AS tmp WHERE NOT EXISTS (SELECT DmChannelId FROM dmchannels WHERE DmChannelId = ? ) LIMIT 1; INSERT INTO dms (DmId, Content, Timestamp, AttachmentId, DmChannelId ) VALUES (?, ?, ?, ?, ?)", [msg.attachments.first().id, attachPath, msg.channel.id, msg.channel.recipient.id, msg.channel.id, msg.id, msg.cleanContent, msg.createdTimestamp, msg.attachments.first().id, msg.channel.id])
+          })
+          .then(resolve('doneWithAttachDm'))
+          .catch(err => reject(err) );
+      }
+    } else {
+      if (msg.channel.type === 'text') {
+        fastqry("INSERT INTO messages (MessageId, UserId, Content, Timestamp, ChannelId ) VALUES (?, ?, ?, ?, ?)", [msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.channel.id])
+          .then(() => resolve('doneWithTextMex'))
+          .catch(err => reject(err));
+      } else if (msg.channel.type === 'dm') {
+        handleUsers(msg.channel.recipient)
+          .then(() => {
+            return fastqry("INSERT INTO dmchannels (DmChannelId, UserId) SELECT * FROM (SELECT ?, ?) AS tmp WHERE NOT EXISTS (SELECT DmChannelId FROM dmchannels WHERE DmChannelId = ? ) LIMIT 1; INSERT INTO dms (DmId, Content, Timestamp, DmChannelId ) VALUES (?, ?, ?, ?)", [msg.channel.id, msg.channel.recipient.id, msg.channel.id, msg.id, msg.cleanContent, msg.createdTimestamp, msg.channel.id])
+          })
+          .then(() => resolve('doneWithTextDm'))
+          .catch(err => reject(err));
+      }
+    }
+  });
+}
 
+/*
 async function processMsg(msg, cb) {
   //IF MESSAGE HAS AN ATTACHMENT
   if (msg.attachments.array().length > 0) {
@@ -267,13 +305,9 @@ async function processMsg(msg, cb) {
   //IF MESSAGE DOESN'T HAVE AN ATTACHMENT
   else {
     if (msg.channel.type === 'text') {
-      con.query("INSERT INTO messages (MessageId, UserId, Content, Timestamp, ChannelId ) VALUES (?, ?, ?, ?, ?)", [msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.channel.id], function(err, result, fields) {
-        if (err) {
-          cb(err);
-        } else {
-          cb(null, 'doneWithMexText');
-        }
-      });
+      fastquery("INSERT INTO messages (MessageId, UserId, Content, Timestamp, ChannelId ) VALUES (?, ?, ?, ?, ?)", [msg.id, msg.author.id, msg.cleanContent, msg.createdTimestamp, msg.channel.id])
+      .then( resolve('doneWithMexText'))
+      .catch(err => {reject(err)});
     } else if (msg.channel.type === 'dm') {
       async.series([
           function(cb) {
@@ -308,6 +342,7 @@ async function processMsg(msg, cb) {
     }
   }
 }
+
 
 function updateMessage(oldmsg, newmsg, cb) {
   if (newmsg.channel.type === 'text') {
@@ -426,24 +461,25 @@ client.on('ready', () => {
       dbdone = true;
     })
     .catch(err => {
-      console.log("ulteriore livello di logging a caso");
+      console.log("Error in 'ready' function" + err);
     });
 });
 
-/*client.on('message', msg => {
+client.on('message', msg => {
   if (dbdone) {
-    processMsg(msg, function(err, result) {
-      if (err) {
-        console.log(err);
-      } else {
-        console.log(result);
-      }
-    });
+    processMsg(msg)
+      .then(status => {
+        console.log("Status: " + status);
+      })
+      .catch(err => {
+        console.log("Error in 'message' function" + err)
+      });
   } else {
     console.log("DB not ready");
   }
 });
 
+/*
 client.on('messageUpdate', function(oldmsg, newmsg) {
   if (dbdone) {
     updateMessage(oldmsg, newmsg, function(err, result) {

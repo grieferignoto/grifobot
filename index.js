@@ -1,7 +1,7 @@
 const Discord = require('discord.js'); //npm discord
 const client = new Discord.Client();
+var Promise = require("bluebird")
 const token = 'NDMwNDUxNzY2ODU4MDg4NDQ4.DaQZfA.Uqb_Xff-pjSq_e2B-ProzzXdpo4';
-//var async = require('async');
 var mysql = require('promise-mysql'); //requires bluebird && promise-mysql && mysqljs
 var https = require('https');
 var fs = require('fs');
@@ -11,27 +11,32 @@ var dbdone = false;
 
 var pool;
 
-function executeQueries(queries_array, args, statusmsg){ //https://stackoverflow.com/questions/32028552/es6-promises-something-like-async-each/32040125?utm_medium=organic&utm_source=google_rich_qa&utm_campaign=google_rich_qa
-  return new Promise(function (resolve, reject){
-    let conn;
-    pool.getConnection()
-    .then( connection => {
-      conn = connection;
-      return queries_array.reduce(function(promise, query, index) {
-        return promise.then( results => {
-            return parallelqry(conn, query, args[index])
+function executeQueries(queries_array, args, statusmsg) { //https://stackoverflow.com/questions/32028552/es6-promises-something-like-async-each/32040125?utm_medium=organic&utm_source=google_rich_qa&utm_campaign=google_rich_qa
+  return new Promise(function(resolve, reject) {
+    if (queries_array.length > 0 && args.length > 0) {
+      let conn;
+      pool.getConnection()
+        .then(connection => {
+          conn = connection;
+          return queries_array.reduce(function(promise, query, index) {
+            return promise.then(results => {
+              return parallelqry(conn, query, args[index])
+            })
+          }, Promise.resolve());
         })
-      }, Promise.resolve());
-    })
-    .then(() => resolve(statusmsg))
-    .catch(err => {
-      reject(err);
-    })
-    .finally( () => {
-      if(conn)
-        conn.release();
-    })
-
+        .then(() => {
+          conn.release();
+          resolve(statusmsg)
+        })
+        .catch(err => {
+          //console.log(err);
+          conn.release();
+          reject(err);
+        })
+    } else {
+      //console.log('EMPTY QUERY!!')
+      resolve('Qempty');
+    }
   });
 
 }
@@ -43,7 +48,6 @@ function parallelqry(connector, query, params) {
         resolve(results);
       })
       .catch(err => {
-        //console.error(err);
         reject(err);
       });
   });
@@ -91,48 +95,82 @@ function download(file_savedest, url) { //https://stackoverflow.com/questions/10
 }
 
 //Multiple statements query to ensure synchrony
-let temp_conn;
-mysql.createConnection({
-    host: '192.168.1.166',
-    user: 'griefer',
-    password: 'porcodio',
-    multipleStatements: true,
-    charset: "utf8mb4_unicode_520_ci"
-  })
-  .then(connection => {
-    temp_conn = connection;
-    return parallelqry(temp_conn, "CREATE DATABASE IF NOT EXISTS discordlog DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_unicode_520_ci")
-  })
-  .then(() => {return parallelqry(temp_conn, "USE discordlog")})
-  .then(() => {return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS guilds (GuildId bigint, Name varchar(102), Available boolean, PRIMARY KEY (GuildId))")})
-  .then(() => {return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS categories (CategoryId bigint, Name varchar(102), GuildId bigint, PRIMARY KEY (CategoryId), FOREIGN KEY (GuildId) REFERENCES guilds(GuildId))")})
-  .then(() => {return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS channels (ChannelId bigint, Name varchar(102), Type varchar(10), CategoryId bigint, GuildId bigint, PRIMARY KEY (ChannelId), FOREIGN KEY (CategoryId) REFERENCES categories(CategoryId), FOREIGN KEY (GuildId) REFERENCES guilds(GuildId))")})
-  .then(() => {return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS users (UserId bigint, Tag varchar(40), Bot boolean, AvatarUrl varchar(10000), AvatarPath varchar(500), Edited boolean, PRIMARY KEY (UserId))")})
-  .then(() => {return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS dmchannels(DmChannelId bigint, UserId bigint, PRIMARY KEY(DmChannelId), FOREIGN KEY (UserId) REFERENCES users(UserId))")})
-  .then(() => {return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS attachments(AttachmentId bigint, Path varchar(500), PRIMARY KEY (AttachmentId))")})
-  .then(() => {return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS dms(DmId bigint, Content varchar(2010), Timestamp bigint, AttachmentId bigint, DmChannelId bigint, Edited boolean, PRIMARY KEY (DmId), FOREIGN KEY (DmChannelId) REFERENCES dmchannels (DmChannelId), FOREIGN KEY (AttachmentId) REFERENCES attachments(AttachmentId))")})
-  .then(() => {return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS messages (MessageId bigint, UserId bigint, Content varchar(2010), Timestamp bigint, AttachmentId bigint, ChannelId bigint, Edited boolean, PRIMARY KEY (MessageId), FOREIGN KEY (UserId) REFERENCES users(UserId), FOREIGN KEY (AttachmentId) REFERENCES attachments(AttachmentId), FOREIGN KEY (ChannelId) REFERENCES channels(ChannelId))")})
-  .then(() => {return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS messages_edits (MexEditId bigint NOT NULL AUTO_INCREMENT, OldContent varchar(2010), NewContent varchar(2010), Timestamp bigint, MessageId bigint, PRIMARY KEY (MexEditId), FOREIGN KEY (MessageId) REFERENCES messages(MessageId))")})
-  .then(() => {return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS dms_edits (DmEditId bigint NOT NULL AUTO_INCREMENT, OldContent varchar(2010), NewContent varchar(2010), Timestamp bigint, DmId bigint, PRIMARY KEY (DmEditId), FOREIGN KEY (DmId) REFERENCES dms(DmId))")})
-  .then(function createPool() {
-    pool = mysql.createPool({
-      host: '192.168.1.166',
-      user: 'griefer',
-      password: 'porcodio',
-      database: 'discordlog',
-      multipleStatements: true,
-      connectionLimit: 20,
-      charset: "utf8mb4_unicode_520_ci"
-    });
-  })
-  .catch(err => {
-    console.log('errore creazione database' + err);
-  })
-  .finally(function release() {
-    if (temp_conn)
-      temp_conn.end();
-    delete temp_conn;
+function createPool() {
+  return new Promise(function(resolve, reject) {
+    let temp_conn;
+    mysql.createConnection({
+        host: '192.168.1.166',
+        user: 'griefer',
+        password: 'porcodio',
+        multipleStatements: true,
+        charset: "utf8mb4_unicode_520_ci"
+      })
+      .then(connection => {
+        temp_conn = connection;
+        return parallelqry(temp_conn, "CREATE DATABASE IF NOT EXISTS discordlog DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_unicode_520_ci")
+      })
+      .then(() => {
+        return parallelqry(temp_conn, "USE discordlog")
+      })
+      .then(() => {
+        return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS guilds (GuildId bigint, Name varchar(102), Available boolean, PRIMARY KEY (GuildId))")
+      })
+      .then(() => {
+        return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS categories (CategoryId bigint, Name varchar(102), GuildId bigint, PRIMARY KEY (CategoryId), FOREIGN KEY (GuildId) REFERENCES guilds(GuildId))")
+      })
+      .then(() => {
+        return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS channels (ChannelId bigint, Name varchar(102), Type varchar(10), CategoryId bigint, GuildId bigint, PRIMARY KEY (ChannelId), FOREIGN KEY (CategoryId) REFERENCES categories(CategoryId), FOREIGN KEY (GuildId) REFERENCES guilds(GuildId))")
+      })
+      .then(() => {
+        return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS users (UserId bigint, Tag varchar(40), Bot boolean, AvatarUrl varchar(10000), AvatarPath varchar(500), Edited boolean, PRIMARY KEY (UserId))")
+      })
+      .then(() => {
+        return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS dmchannels(DmChannelId bigint, UserId bigint, PRIMARY KEY(DmChannelId), FOREIGN KEY (UserId) REFERENCES users(UserId))")
+      })
+      .then(() => {
+        return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS attachments(AttachmentId bigint, Path varchar(500), PRIMARY KEY (AttachmentId))")
+      })
+      .then(() => {
+        return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS dms(DmId bigint, Content varchar(2010), Timestamp bigint, AttachmentId bigint, DmChannelId bigint, Edited boolean, PRIMARY KEY (DmId), FOREIGN KEY (DmChannelId) REFERENCES dmchannels (DmChannelId), FOREIGN KEY (AttachmentId) REFERENCES attachments(AttachmentId))")
+      })
+      .then(() => {
+        return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS messages (MessageId bigint, UserId bigint, Content varchar(2010), Timestamp bigint, AttachmentId bigint, ChannelId bigint, Edited boolean, PRIMARY KEY (MessageId), FOREIGN KEY (UserId) REFERENCES users(UserId), FOREIGN KEY (AttachmentId) REFERENCES attachments(AttachmentId), FOREIGN KEY (ChannelId) REFERENCES channels(ChannelId))")
+      })
+      .then(() => {
+        return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS messages_edits (MexEditId bigint NOT NULL AUTO_INCREMENT, OldContent varchar(2010), NewContent varchar(2010), Timestamp bigint, MessageId bigint, PRIMARY KEY (MexEditId), FOREIGN KEY (MessageId) REFERENCES messages(MessageId))")
+      })
+      .then(() => {
+        return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS dms_edits (DmEditId bigint NOT NULL AUTO_INCREMENT, OldContent varchar(2010), NewContent varchar(2010), Timestamp bigint, DmId bigint, PRIMARY KEY (DmEditId), FOREIGN KEY (DmId) REFERENCES dms(DmId))")
+      })
+      .then(() => {
+        return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS channels_edits (ChannelEditId bigint NOT NULL AUTO_INCREMENT, OldName varchar(102), NewName varchar(102), OldCategoryId bigint, NewCategoryId bigint, ChannelId bigint, PRIMARY KEY (ChannelEditId), FOREIGN KEY (ChannelId) REFERENCES channels(ChannelId), FOREIGN KEY (OldCategoryId) REFERENCES categories(CategoryId), FOREIGN KEY (NewCategoryId) REFERENCES categories(CategoryId))")
+      })
+      .then(() => {
+        return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS categories_edits (CategoryEditId bigint NOT NULL AUTO_INCREMENT, OldName varchar(102), NewName varchar(102), CategoryId bigint, PRIMARY KEY (CategoryEditId), FOREIGN KEY (CategoryId) REFERENCES categories(CategoryId))")
+      })
+      .then(function() {
+        return pool = mysql.createPool({
+          host: '192.168.1.166',
+          user: 'griefer',
+          password: 'porcodio',
+          database: 'discordlog',
+          multipleStatements: true,
+          connectionLimit: 20,
+          charset: "utf8mb4_unicode_520_ci"
+        })
+
+      })
+      .then(() => resolve('CreatedPool'))
+      .catch(err => {
+        console.log(err);
+        reject('Error creating Pool')
+      })
+      .finally(function() {
+        if (temp_conn)
+          temp_conn.end();
+      });
   });
+}
 
 async function handleUsers(user) {
   return new Promise(function(resolve, reject) {
@@ -189,6 +227,74 @@ async function handleUsers(user) {
   });
 }
 
+function handleChannels(channels, action, connection) {
+  return new Promise(function(resolve, reject) {
+    let temp_conn;
+    let channel_queries = [];
+    let channel_args = [];
+    if (typeof conn !== 'undefined')
+      conn = connection;
+    if (action !== 'update') {
+      for (let i = 0; i < channels.length; i++) {
+        let channel = channels[i];
+        if (channels[i].type === 'category') {
+          channel_queries.push("INSERT INTO categories (CategoryId, Name, GuildId) SELECT * FROM (SELECT ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT CategoryId FROM categories WHERE CategoryId = ? ) LIMIT 1;");
+          channel_args.push([channel.id, channel.name, channel.guild.id, channel.id]);
+          /*} else if (channels[i].type === 'dm') {
+            channel_queries.push("INSERT INTO dmchannels (DmChannelId, UserId) SELECT * FROM (SELECT ?, ? ) AS tmp WHERE NOT EXISTS (SELECT DmChannelId FROM dmchannels WHERE DmChannelId = ? ) LIMIT 1;");
+            channel_args.push([channel.id, channel.recipient.id, channel.id]);*/
+        } else if (channels[i].type !== 'dm') {
+          let parentchan;
+          if (channels[i].parentID !== null) {
+            parentchan = channels[i].guild.channels.get(channels[i].parentID);
+            //console.log(parentchan);
+            channel_queries.push("INSERT INTO categories (CategoryId, Name, GuildId) SELECT * FROM (SELECT ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT CategoryId FROM categories WHERE CategoryId = ? ) LIMIT 1;")
+            channel_args.push([parentchan.id, parentchan.name, parentchan.guild.id, parentchan.id]);
+          }
+          channel_queries.push("INSERT INTO channels (ChannelId, Name, Type, CategoryId, GuildId) SELECT * FROM (SELECT ?, ?, ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT ChannelId FROM channels WHERE ChannelId = ? ) LIMIT 1;");
+          channel_args.push([channel.id, channel.name, channel.type, channel.parentID, channel.guild.id, channel.id]);
+        }
+      }
+    }
+    executeQueries(channel_queries, channel_args, 'doneWithInsertChannels')
+      .then(() => {
+        return pool.getConnection()
+      })
+      .then(gotConn => {
+        temp_conn = gotConn;
+      })
+      .then(async function() {
+        let queries2 = [];
+        let args2 = [];
+        for (let i = 0; i < channels.length; i++) {
+          if (channels[i].type === 'category') {
+            await parallelqry(temp_conn, "SELECT Name FROM categories WHERE CategoryId = ?", channels[i].id)
+              .then(results => {
+                if (results[0].Name !== channels[i].name) {
+                  queries2.push("INSERT INTO categories_edits(OldName, NewName, CategoryId) VALUES (?, ?, ?); UPDATE categories SET Name = ? WHERE CategoryId = ?");
+                  args2.push([results[0].Name, channels[i].name, channels[i].id, channels[i].name, channels[i].id]);
+                }
+              });
+          } else if (channels[i].type !== 'dm') {
+            await parallelqry(temp_conn, "SELECT Name,CAST(CategoryId AS CHAR) as CategoryId FROM channels WHERE ChannelId = ?", channels[i].id) //CategoryId is too big for node ints, needs to be retrieved as a string
+              .then(results => {
+                if ((results[0].Name !== channels[i].name) || (results[0].CategoryId !== channels[i].parentID)) {
+                  queries2.push("INSERT INTO channels_edits(OldName, NewName, OldCategoryId, NewCategoryId, ChannelId) VALUES (?, ?, ?, ?, ?); UPDATE channels SET Name = ?, CategoryId = ? WHERE ChannelId = ?");
+                  args2.push([results[0].Name, channels[i].name, results[0].CategoryId, channels[i].parentID, channels[i].id, channels[i].name, channels[i].parentID, channels[i].id]);
+                }
+              });
+          }
+        }
+        return executeQueries(queries2, args2, 'doneHandleChannel')
+          .then(status => {
+            temp_conn.release();
+            resolve(status);
+          });
+      })
+      .catch(err => reject(err))
+  });
+}
+
 function populatedb() {
   return new Promise(function(resolve, reject) {
     var client_users = client.users.array();
@@ -214,17 +320,7 @@ function populatedb() {
         return Promise.all(promise_guilds);
       })
       .then(function channels() {
-        let promise_channels = [];
-        for (let i = 0; i < client_channels.length; i++) {
-          let channel = client_channels[i];
-          if (channel.type === 'category')
-            promise_channels.push(parallelqry(conn, "INSERT INTO categories (CategoryId, Name, GuildId) SELECT * FROM (SELECT ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT CategoryId FROM categories WHERE CategoryId = ? ) LIMIT 1;", [channel.id, channel.name, channel.guild.id, channel.id]));
-          else if (channel.type === 'dm')
-            promise_channels.push(parallelqry(conn, "INSERT INTO dmchannels (DmId, UserId) SELECT * FROM (SELECT ?, ? ) AS tmp WHERE NOT EXISTS (SELECT DmId FROM dmchannels WHERE DmId = ? ) LIMIT 1;", [channel.id, channel.recipient.id]));
-          else
-            promise_channels.push(parallelqry(conn, "INSERT INTO channels (ChannelId, Name, Type, CategoryId, GuildId) SELECT * FROM (SELECT ?, ?, ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT ChannelId FROM channels WHERE ChannelId = ? ) LIMIT 1;", [channel.id, channel.name, channel.type, channel.parentID, channel.guild.id, channel.id]));
-        }
-        return Promise.all(promise_channels);
+        return handleChannels(client_channels)
       })
       .then(function doneWithPopulate() {
         console.log('doneWithPopulate')
@@ -233,7 +329,7 @@ function populatedb() {
       .catch(err => {
         reject(err);
       })
-      .finally(function release() {
+      .finally(function() {
         if (conn)
           conn.release();
       });
@@ -276,27 +372,35 @@ function processMsg(msg) {
   });
 }
 
-function updateMessage(oldmsg, newmsg){
-  return new Promise(function(resolve, reject){
+function updateMessage(oldmsg, newmsg) {
+  return new Promise(function(resolve, reject) {
 
     let array_commands = [];
     let array_args = [];
     let temp_conn, statusmsg;
-    if (newmsg.channel.type === 'text'){
+    if (newmsg.channel.type === 'text') {
       array_commands = ["UPDATE messages SET Content = ?, Edited = 1 WHERE MessageId = ?", "INSERT INTO messages_edits (OldContent, NewContent, Timestamp, MessageId ) VALUES (?, ?, ?, ?)"];
-      array_args = [ [newmsg.cleanContent, oldmsg.id], [oldmsg.cleanContent, newmsg.cleanContent, newmsg.editedTimestamp, newmsg.id] ];
+      array_args = [
+        [newmsg.cleanContent, oldmsg.id],
+        [oldmsg.cleanContent, newmsg.cleanContent, newmsg.editedTimestamp, newmsg.id]
+      ];
       statusmsg = 'doneWithUpdateMex';
-    }else if (newmsg.channel.type === 'dm'){
+    } else if (newmsg.channel.type === 'dm') {
       array_commands = ["UPDATE dms SET Content = ?, Edited = 1 WHERE DmId = ?", "INSERT INTO dms_edits (OldContent, NewContent, Timestamp, DmId ) VALUES (?, ?, ?, ?)"];
-      array_args = [ [newmsg.cleanContent, oldmsg.id], [oldmsg.cleanContent, newmsg.cleanContent, newmsg.editedTimestamp, newmsg.id] ];
+      array_args = [
+        [newmsg.cleanContent, oldmsg.id],
+        [oldmsg.cleanContent, newmsg.cleanContent, newmsg.editedTimestamp, newmsg.id]
+      ];
       statusmsg = 'doneWithUpdateDm';
     }
     executeQueries(array_commands, array_args, statusmsg)
-    .then( status => resolve(status))
-    .catch( err => reject(err));
+      .then(status => resolve(status))
+      .catch(err => reject(err));
 
   });
 }
+
+
 
 /* TODO:
 -SETTARE A 500 LE CLIENT OPTIONS PER I MESSAGE LIFETIME;
@@ -340,13 +444,29 @@ if (!fs.existsSync(path.resolve(__dirname, './attachments'))) {
 
 client.on('channelCreate', channel => {
   if (dbdone) {
-
+    handleChannels([channel], 'create')
+      .then(statusmsg => console.log(statusmsg))
+      .catch(err => console.log("Error in 'channelCreate' function\n", err));
   }
 });
 
+client.on('channelUpdate', function(oldchannel, newchannel) {
+  if (dbdone) {
+    handleChannels([newchannel], 'update')
+      .then(statusmsg => {
+        if (statusmsg !== 'Qempty')
+          console.log(statusmsg)
+      })
+      .catch(err => console.log("Error in 'channelUpdate' function\n", err));
+  }
+})
+
 client.on('ready', () => {
   console.log(`Logged in as ${client.user.tag}!`);
-  populatedb()
+  createPool()
+    .then(() => {
+      return populatedb();
+    })
     .then(function donePopulate() {
       dbdone = true;
     })
@@ -373,15 +493,12 @@ client.on('message', msg => {
 client.on('messageUpdate', function(oldmsg, newmsg) {
   if (dbdone) {
     updateMessage(oldmsg, newmsg)
-    .then( statusmsg => console.log(statusmsg))
-    .catch(err => console.log("Error in 'updateMessage' function\n", err));
-    }
+      .then(statusmsg => console.log('msgup' + statusmsg))
+      .catch(err => console.log("Error in 'updateMessage' function\n", err));
+  }
 });
 
 /*
-client.on('channelUpdate', function(oldmsg, newmsg) {
-  console.log("Fired channelUpdate");
-});
 
 client.on('guildMemberAdd', function(member) {
   handleUsers(member.user, function(err, result) {

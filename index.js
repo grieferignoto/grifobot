@@ -5,6 +5,7 @@ const token = 'NDMwNDUxNzY2ODU4MDg4NDQ4.DaQZfA.Uqb_Xff-pjSq_e2B-ProzzXdpo4';
 var mysql = require('promise-mysql'); //requires bluebird && promise-mysql && mysqljs
 var https = require('https');
 var fs = require('fs');
+var diff = require('arr-diff');
 const path = require('path');
 
 var dbdone = false;
@@ -116,10 +117,10 @@ function createPool() {
         return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS guilds (GuildId bigint, Name varchar(102), Available boolean, PRIMARY KEY (GuildId))")
       })
       .then(() => {
-        return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS categories (CategoryId bigint, Name varchar(102), GuildId bigint, PRIMARY KEY (CategoryId), FOREIGN KEY (GuildId) REFERENCES guilds(GuildId))")
+        return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS categories (CategoryId bigint, Name varchar(102), GuildId bigint, Deleted boolean, PRIMARY KEY (CategoryId), FOREIGN KEY (GuildId) REFERENCES guilds(GuildId))")
       })
       .then(() => {
-        return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS channels (ChannelId bigint, Name varchar(102), Type varchar(10), CategoryId bigint, GuildId bigint, PRIMARY KEY (ChannelId), FOREIGN KEY (CategoryId) REFERENCES categories(CategoryId), FOREIGN KEY (GuildId) REFERENCES guilds(GuildId))")
+        return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS channels (ChannelId bigint, Name varchar(102), Type varchar(10), CategoryId bigint, GuildId bigint, Deleted boolean, PRIMARY KEY (ChannelId), FOREIGN KEY (CategoryId) REFERENCES categories(CategoryId), FOREIGN KEY (GuildId) REFERENCES guilds(GuildId))")
       })
       .then(() => {
         return parallelqry(temp_conn, "CREATE TABLE IF NOT EXISTS users (UserId bigint, Tag varchar(40), Bot boolean, AvatarUrl varchar(10000), AvatarPath varchar(500), Edited boolean, PRIMARY KEY (UserId))")
@@ -227,14 +228,22 @@ async function handleUsers(user) {
   });
 }
 
-function handleChannels(channels, action, connection) {
+function handleChannels(client_channels, action, connection) {
   return new Promise(function(resolve, reject) {
     let temp_conn;
     let channel_queries = [];
     let channel_args = [];
+    let queries_removedchans = [];
+    let args_removedchans = [];
+    let channels = [];
+    if (action === 'initialize')
+      channels = client_channels.array();
+    else
+      channels = client_channels;
+
     if (typeof conn !== 'undefined')
       conn = connection;
-    if (action !== 'update') {
+    if (action === 'initialize' || action === 'create') {
       for (let i = 0; i < channels.length; i++) {
         let channel = channels[i];
         if (channels[i].type === 'category') {
@@ -245,9 +254,8 @@ function handleChannels(channels, action, connection) {
             channel_args.push([channel.id, channel.recipient.id, channel.id]);*/
         } else if (channels[i].type !== 'dm') {
           let parentchan;
-          if (channels[i].parentID !== null) {
+          if (channels[i].parentID !== null && channels[i].parentID !== undefined) {
             parentchan = channels[i].guild.channels.get(channels[i].parentID);
-            //console.log(parentchan);
             channel_queries.push("INSERT INTO categories (CategoryId, Name, GuildId) SELECT * FROM (SELECT ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT CategoryId FROM categories WHERE CategoryId = ? ) LIMIT 1;")
             channel_args.push([parentchan.id, parentchan.name, parentchan.guild.id, parentchan.id]);
           }
@@ -263,7 +271,47 @@ function handleChannels(channels, action, connection) {
       .then(gotConn => {
         temp_conn = gotConn;
       })
-      .then(async function() {
+      .then(function handleDeletes() {
+        if (action === 'initialize') {
+          return parallelqry(temp_conn, "SELECT CAST(ChannelId AS CHAR) as ChannelId FROM channels WHERE Deleted IS NULL")
+            .then(results => {
+              let removedchannelarr = [];
+              let removedchannels = [];
+              for (let i = 0; i < results.length; i++) {
+                removedchannelarr.push(results[i].ChannelId);
+              }
+              removedchannels = diff(removedchannelarr, client_channels.keyArray());
+              for (let i = 0; i < removedchannels.length; i++) {
+                queries_removedchans.push("UPDATE channels SET Deleted = 1 WHERE ChannelId = ?");
+                args_removedchans.push([removedchannels[i]]);
+              }
+              return removedchannels;
+            })
+            .then(() => {
+              return parallelqry(temp_conn, "SELECT CAST(CategoryId AS CHAR) as CategoryId FROM categories WHERE Deleted IS NULL")
+                .then(results => {
+                  let removedcategoriesarr = [];
+                  let removedcategories = [];
+                  for (let i = 0; i < results.length; i++) {
+                    removedcategoriesarr.push(results[i].CategoryId);
+                  }
+                  removedcategories = diff(removedcategoriesarr, client_channels.keyArray());
+                  for (let i = 0; i < removedcategories.length; i++) {
+                    queries_removedchans.push("UPDATE categories SET Deleted = 1 WHERE CategoryId = ?")
+                    args_removedchans.push([removedcategories[i]]);
+                  }
+                  return removedcategories;
+                })
+            })
+        } else if (action === 'delete') {
+          queries_removedchans.push("UPDATE categories SET Deleted = 1 WHERE CategoryId = ?; UPDATE channels SET Deleted = 1 WHERE ChannelId = ?");
+          args_removedchans.push([channels[0].id, channels[0].id]);
+        }
+      })
+      .then(() => {
+        return executeQueries(queries_removedchans, args_removedchans, 'doneWithRemovedChannels')
+      })
+      .then(async function updateChannels() {
         let queries2 = [];
         let args2 = [];
         for (let i = 0; i < channels.length; i++) {
@@ -289,7 +337,7 @@ function handleChannels(channels, action, connection) {
           .then(status => {
             temp_conn.release();
             resolve(status);
-          });
+          })
       })
       .catch(err => reject(err))
   });
@@ -299,7 +347,7 @@ function populatedb() {
   return new Promise(function(resolve, reject) {
     var client_users = client.users.array();
     var client_guilds = client.guilds.array();
-    var client_channels = client.channels.array();
+    //var client_channels = client.channels.array();
     var conn;
     pool.getConnection()
       .then(connection => {
@@ -320,7 +368,7 @@ function populatedb() {
         return Promise.all(promise_guilds);
       })
       .then(function channels() {
-        return handleChannels(client_channels)
+        return handleChannels(client.channels, 'initialize');
       })
       .then(function doneWithPopulate() {
         console.log('doneWithPopulate')
@@ -423,21 +471,20 @@ if (!fs.existsSync(path.resolve(__dirname, './attachments'))) {
 
 
 /*EVENTS TO HANDLE
-  channelCreate
+  channelCreate !!!
   channelDelete
-  channelUpdate ----
+  channelUpdate !!!
   guildCreate
   guildDelete
   guildMemberAdd
-  guildUpdate ----
   guildMemberUpdate ???
   guildUpdate ----
-  message
+  message !!!
   messageDelete
   messageDeleteBulk
-  messageUpdate
-  ready
-  resume
+  messageUpdate !!!
+  ready !!!
+  resume-
   userUpdate ???
 
 */
@@ -445,7 +492,7 @@ if (!fs.existsSync(path.resolve(__dirname, './attachments'))) {
 client.on('channelCreate', channel => {
   if (dbdone) {
     handleChannels([channel], 'create')
-      .then(statusmsg => console.log(statusmsg))
+      .then(statusmsg => console.log('channelCreate', statusmsg))
       .catch(err => console.log("Error in 'channelCreate' function\n", err));
   }
 });
@@ -455,9 +502,20 @@ client.on('channelUpdate', function(oldchannel, newchannel) {
     handleChannels([newchannel], 'update')
       .then(statusmsg => {
         if (statusmsg !== 'Qempty')
-          console.log(statusmsg)
+          console.log('channelUpdate', statusmsg)
       })
       .catch(err => console.log("Error in 'channelUpdate' function\n", err));
+  }
+});
+
+client.on('channelDelete', channel => {
+  if (dbdone) {
+    handleChannels([channel], 'delete')
+      .then(statusmsg => {
+        if (statusmsg !== 'Qempty')
+          console.log('channelDelete', statusmsg)
+      })
+      .catch(err => console.log("Error in 'channelDelete' function\n", err));
   }
 })
 

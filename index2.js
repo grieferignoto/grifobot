@@ -25,7 +25,9 @@ const cass = new cassandra.Client({
 function executeQueries(queries_batch, statusmsg) { //https://stackoverflow.com/questions/32028552/es6-promises-something-like-async-each/32040125?utm_medium=organic&utm_source=google_rich_qa&utm_campaign=google_rich_qa
   return new Promise(function(resolve, reject) {
     if (queries_batch.length > 0) {
-        cass.batch(queries_batch, {prepare : true})
+      cass.batch(queries_batch, {
+          prepare: true
+        })
         .then(() => {
           resolve(statusmsg)
         })
@@ -108,10 +110,10 @@ function createPool() {
         return parallelqry("CREATE TABLE IF NOT EXISTS guilds (guildid bigint, name varchar, available boolean, botispresent boolean, PRIMARY KEY (guildid))")
       })
       .then(() => {
-        return parallelqry("CREATE TABLE IF NOT EXISTS categories (categoryid bigint, name varchar, guildid bigint, deleted boolean, PRIMARY KEY (categoryid))")
+        return parallelqry("CREATE TABLE IF NOT EXISTS categories (categoryid bigint, name varchar, guildid bigint, deleted boolean, botislogging boolean, PRIMARY KEY (categoryid))")
       })
       .then(() => {
-        return parallelqry("CREATE TABLE IF NOT EXISTS channels (channelid bigint, name varchar, type varchar, categoryid bigint, guildid bigint, deleted boolean, PRIMARY KEY (channelid))")
+        return parallelqry("CREATE TABLE IF NOT EXISTS channels (channelid bigint, name varchar, type varchar, categoryid bigint, guildid bigint, deleted boolean, botislogging boolean, PRIMARY KEY (channelid))")
       })
       .then(() => {
         return parallelqry("CREATE TABLE IF NOT EXISTS users (userid bigint, tag varchar, bot boolean, avatarurl varchar, avatarpath varchar, edited boolean, PRIMARY KEY (userid))")
@@ -138,13 +140,19 @@ function createPool() {
         return parallelqry("CREATE TABLE IF NOT EXISTS guilds_edits (guildeditid timeuuid, oldname varchar, newname varchar, guildid bigint, PRIMARY KEY (guildeditid))")
       })
       .then(() => {
-        return parallelqry("CREATE INDEX IF NOT EXISTS ON guilds (botispresent)")
-      })
-      .then(() => {
         return parallelqry("CREATE TABLE IF NOT EXISTS channels_edits (channeleditid timeuuid, oldname varchar, newname varchar, oldcategoryid bigint, newcategoryid bigint, channelid bigint, PRIMARY KEY (channeleditid))")
       })
       .then(() => {
         return parallelqry("CREATE TABLE IF NOT EXISTS categories_edits (categoryeditid timeuuid, oldname varchar, newname varchar, categoryid bigint, PRIMARY KEY (categoryeditid))")
+      })
+      .then(() => {
+        return parallelqry("CREATE INDEX IF NOT EXISTS ON guilds (botispresent)")
+      })
+      .then(() => {
+        return parallelqry("CREATE INDEX IF NOT EXISTS ON categories (deleted)")
+      })
+      .then(() => {
+        return parallelqry("CREATE INDEX IF NOT EXISTS ON channels (deleted)")
       })
       .then(() => resolve('CreatedPool'))
       .catch(err => {
@@ -154,45 +162,50 @@ function createPool() {
   });
 }
 
-function handleUsers(user) {
+function handleUsers(client_users, action) {
   return new Promise(function(resolve, reject) {
-    var avatarPath = path.resolve(__dirname, './avatars', user.id);
-    var conn;
-    parallelqry("INSERT INTO users (userid , tag, bot, avatarurl, edited) VALUES (?, ?, ?, ?, false) IF NOT EXISTS", [user.id, user.tag, user.bot, user.displayAvatarURL])
-      .then(function() {
-        return parallelqry("SELECT avatarurl, avatarpath FROM users WHERE userid = ?", [user.id]);
-      })
-      .then(results => {
-        //console.log('RISULTATI :', results);
-        let currentPath = results.rows[0].avatarpath;
-        console.log(currentPath);
-        let newPath;
-        if (currentPath === null)
-          newPath = path.resolve(avatarPath + "-0000" + ".png");
-        else if (results.rows[0].avatarurl !== user.displayAvatarURL)
-          newPath = path.resolve(avatarPath + "-" + ((parseInt((currentPath.substr(currentPath.length - 8)).substr(0, 4)) + 1).toString().padStart(4, "0")) + ".png");
-        else
-          newPath = "unchanged";
+    let promises1 = [];
+    let promises2 = [];
 
-        if (newPath !== "unchanged") {
-          return parallelqry("UPDATE users SET avatarurl = ?, avatarpath = ? WHERE userid = ?", [user.displayAvatarURL, newPath, user.id])
-            .then(function() {
-              download(newPath, user.displayAvatarURL);
-              return 'aggiornato';
+    if (action === 'initialize')
+      users = client_users.array();
+    else
+      users = client_users;
+
+    if (action === 'initialize' || action === 'insert') {
+      for (let i = 0; i < users.length; i++) {
+        promises1.push(parallelqry("INSERT INTO users (userid , tag, bot, avatarurl, edited) VALUES (?, ?, ?, ?, false) IF NOT EXISTS", [users[i].id, users[i].tag, users[i].bot, users[i].displayAvatarURL]));
+      }
+    }
+    Promise.all(promises1)
+      .then(async function updateUsers() {
+        if (action === 'initialize' || action === 'update') {
+          for (let i = 0; i < users.length; i++) {
+            var avatarPath = path.resolve(__dirname, './avatars', users[i].id);
+            await parallelqry("SELECT avatarurl, avatarpath FROM users WHERE userid = ?", [users[i].id])
+              //console.log('RISULTATI :', results);
+              .then(results => {
+                let currentPath = results.rows[0].avatarpath;
+                let newPath;
+                if (currentPath === null)
+                  newPath = path.resolve(avatarPath + "-0000" + ".png");
+                else if (results.rows[0].avatarurl !== users[i].displayAvatarURL)
+                  newPath = path.resolve(avatarPath + "-" + ((parseInt((currentPath.substr(currentPath.length - 8)).substr(0, 4)) + 1).toString().padStart(4, "0")) + ".png");
+                else
+                  newPath = "unchanged";
+
+                if (newPath !== "unchanged") {
+                  queries2.push(parallelqry("UPDATE users SET avatarurl = ?, avatarpath = ? WHERE userid = ?", [users[i].displayAvatarURL, newPath, users[i].id]));
+                  download(newPath, users[i].displayAvatarURL);
+                }
+              });
+          }
+          return Promise.all(promises2)
+            .then(status => {
+              resolve(status);
             })
-            .catch(err => {
-              console.log(err);
-              return 'err';
-            });
         } else {
-          return 'unchanged';
-        }
-      })
-      .then(status => {
-        if (status !== 'err') {
-          resolve(status);
-        } else {
-          reject(status);
+          resolve('doneHandleUser_NoUpdate');
         }
       })
       .catch(err => {
@@ -218,33 +231,33 @@ function handleGuilds(client_guilds, action) {
     if (action === 'initialize' || action === 'add') {
       for (let i = 0; i < guilds.length; i++) {
         if (guilds[i].available) {
-          guilds_queries.push({query:"INSERT INTO guilds (guildid, name, available) VALUES (?, ?, true) IF NOT EXISTS", params: [guilds[i].id, guilds[i].name]})
-          guilds_queries.push({query:"UPDATE guilds SET botispresent = true WHERE guildid = ?", params: [guilds[i].id] })
+          guilds_queries.push(parallelqry("INSERT INTO guilds (guildid, name, available) VALUES (?, ?, true) IF NOT EXISTS", [guilds[i].id, guilds[i].name]));
+          guilds_queries.push(parallelqry("UPDATE guilds SET botispresent = true WHERE guildid = ?", [guilds[i].id]));
         }
       }
     }
-    executeQueries(guilds_queries,'doneWithInsertGuilds')
+    Promise.all(guilds_queries)
       .then(function handleGuildDeletes() {
         if (action === 'initialize') {
           return parallelqry("SELECT guildid FROM guilds WHERE botispresent = true")
             .then(results => {
+              //console.log(results.rows[0].guildid)
               let allGuildsArr = [];
               let removedGuilds = [];
               for (let i = 0; i < results.rows.length; i++) {
-                allGuildsArr.push(results.rows[i].guildid);
+                allGuildsArr.push(results.rows[i].guildid.toString()); // Object Long is returned, cast to string
               }
               removedGuilds = diff(allGuildsArr, client_guilds.keyArray());
               for (let i = 0; i < removedGuilds.length; i++) {
-                console.log('ciccio')
-                queries_removedguilds.push({query:"UPDATE guilds SET botispresent = false WHERE guildid = ?", params: [removedGuilds[i]] });
+                queries_removedguilds.push(parallelqry("UPDATE guilds SET botispresent = false WHERE guildid = ?", [removedGuilds[i]]));
               }
             })
         } else if (action === 'remove') {
-          queries_removedguilds.push({query:"UPDATE guilds SET botispresent = false WHERE guildid = ?", params: [guilds[0].id] });
+          queries_removedguilds.push(parallelqry("UPDATE guilds SET botispresent = false WHERE guildid = ?", [guilds[0].id]));
         }
       })
       .then(() => {
-        return executeQueries(queries_removedguilds, 'doneWithDeleteGuilds')
+        return Promise.all(queries_removedguilds)
       })
       .then(async function updateGuilds() {
         if (action === 'initialize' || action === 'update') {
@@ -253,12 +266,12 @@ function handleGuilds(client_guilds, action) {
             await parallelqry("SELECT name FROM guilds WHERE guildid = ?", [guilds[i].id])
               .then(results => {
                 if (results.rows[0].name !== guilds[i].name) {
-                  queries2.push({query: "INSERT INTO guilds_edits(guildeditid, oldname, newname, guildid) VALUES (?, ?, ?, ?);", params: [TimeUuid.now(), results.rows[0].name, guilds[i].name, guilds[i].id]});
-                  queries2.push({query: "UPDATE guilds SET Name = ? WHERE guildid = ?", params: [guilds[i].name, guilds[i].id]});
+                  queries2.push(parallelqry("INSERT INTO guilds_edits(guildeditid, oldname, newname, guildid) VALUES (?, ?, ?, ?);", [TimeUuid.now(), results.rows[0].name, guilds[i].name, guilds[i].id]));
+                  queries2.push(parallelqry("UPDATE guilds SET Name = ? WHERE guildid = ?", [guilds[i].name, guilds[i].id]));
                 }
               })
           }
-          return executeQueries(queries2, 'doneWithUpdateGuild')
+          return Promise.all(queries2)
             .then(status => {
               resolve(status);
             })
@@ -271,143 +284,132 @@ function handleGuilds(client_guilds, action) {
       })
   });
 }
-/*
-function handleChannels(client_channels, action, connection) {
+
+function handleChannels(client_channels, action) {
   return new Promise(function(resolve, reject) {
     let temp_conn = null;
-    let channel_queries = [];
+    let promises1 = [];
     let channel_args = [];
     let queries_removedchans = [];
     let args_removedchans = [];
     let channels = [];
+
     if (action === 'initialize')
       channels = client_channels.array();
     else
       channels = client_channels;
 
-    if (typeof conn !== 'undefined')
-      conn = connection;
     if (action === 'initialize' || action === 'create') {
       for (let i = 0; i < channels.length; i++) {
         let channel = channels[i];
         if (channels[i].type === 'category') {
-          channel_queries.push("INSERT INTO categories (CategoryId, Name, GuildId) SELECT * FROM (SELECT ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT CategoryId FROM categories WHERE CategoryId = ? ) LIMIT 1;");
-          channel_args.push([channel.id, channel.name, channel.guild.id, channel.id]);
+          promises1.push(parallelqry("INSERT INTO categories (categoryid, name, guildid) VALUES ( ?, ?, ?) IF NOT EXISTS;", [channel.id, channel.name, channel.guild.id]));
+          promises1.push(parallelqry("UPDATE categories SET deleted = false WHERE categoryid = ?", [channel.id]))
         } else if (channels[i].type !== 'dm') {
-          let parentchan;
-          if (channels[i].parentID !== null && channels[i].parentID !== undefined) {
+          /*if (channels[i].parentID !== null && channels[i].parentID !== undefined) {
             parentchan = channels[i].guild.channels.get(channels[i].parentID);
-            channel_queries.push("INSERT INTO categories (CategoryId, Name, GuildId) SELECT * FROM (SELECT ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT CategoryId FROM categories WHERE CategoryId = ? ) LIMIT 1;")
+            channel_queries.push({"INSERT INTO categories (categoryid, name, guildid) SELECT * FROM (SELECT ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT CategoryId FROM categories WHERE CategoryId = ? ) LIMIT 1;")
             channel_args.push([parentchan.id, parentchan.name, parentchan.guild.id, parentchan.id]);
-          }
-          channel_queries.push("INSERT INTO channels (ChannelId, Name, Type, CategoryId, GuildId) SELECT * FROM (SELECT ?, ?, ?, ?, ? ) AS tmp WHERE NOT EXISTS (SELECT ChannelId FROM channels WHERE ChannelId = ? ) LIMIT 1;");
-          channel_args.push([channel.id, channel.name, channel.type, channel.parentID, channel.guild.id, channel.id]);
+          }*/
+          promises1.push(parallelqry("INSERT INTO channels (channelid, name, type, categoryid, guildid) VALUES ( ?, ?, ?, ?, ?) IF NOT EXISTS;", [channel.id, channel.name, channel.type, channel.parentID, channel.guild.id]));
+          promises1.push(parallelqry("UPDATE channels SET deleted = false WHERE channelid = ?", [channel.id]))
         }
       }
     }
-    executeQueries(channel_queries, channel_args, 'doneWithInsertChannels')
-      .then(() => {
-        return pool.getConnection()
-      })
-      .then(gotConn => {
-        temp_conn = gotConn;
-      })
+    Promise.all(promises1)
       .then(function handleChannelDeletes() {
         if (action === 'initialize') {
-          return parallelqry(temp_conn, "SELECT CAST(ChannelId AS CHAR) as ChannelId FROM channels WHERE Deleted IS NULL")
+          return parallelqry("SELECT channelid FROM channels WHERE deleted = false")
             .then(results => {
               let removedchannelarr = [];
               let removedchannels = [];
-              for (let i = 0; i < results.length; i++) {
-                removedchannelarr.push(results[i].ChannelId);
+              for (let i = 0; i < results.rows.length; i++) {
+                removedchannelarr.push(results.rows[i].channelid.toString()); // Object Long is returned, cast to string
               }
               removedchannels = diff(removedchannelarr, client_channels.keyArray());
               for (let i = 0; i < removedchannels.length; i++) {
-                queries_removedchans.push("UPDATE channels SET Deleted = 1 WHERE ChannelId = ?");
-                args_removedchans.push([removedchannels[i]]);
+                queries_removedchans.push(parallelqry("UPDATE channels SET deleted = true WHERE channelid = ?", [removedchannels[i]]));
               }
               return removedchannels;
             })
             .then(() => {
-              return parallelqry(temp_conn, "SELECT CAST(CategoryId AS CHAR) as CategoryId FROM categories WHERE Deleted IS NULL")
+              return parallelqry("SELECT categoryid FROM categories WHERE deleted = false")
                 .then(results => {
                   let removedcategoriesarr = [];
                   let removedcategories = [];
-                  for (let i = 0; i < results.length; i++) {
-                    removedcategoriesarr.push(results[i].CategoryId);
+                  for (let i = 0; i < results.rows.length; i++) {
+                    removedcategoriesarr.push(results.rows[i].categoryid.toString());
                   }
                   removedcategories = diff(removedcategoriesarr, client_channels.keyArray());
                   for (let i = 0; i < removedcategories.length; i++) {
-                    queries_removedchans.push("UPDATE categories SET Deleted = 1 WHERE CategoryId = ?")
-                    args_removedchans.push([removedcategories[i]]);
+                    queries_removedchans.push({
+                      query: "UPDATE categories SET deleted = false WHERE categoryid = ?",
+                      params: [removedcategories[i]]
+                    })
                   }
                   return removedcategories;
                 })
             })
         } else if (action === 'delete') {
-          queries_removedchans.push("UPDATE categories SET Deleted = 1 WHERE CategoryId = ?; UPDATE channels SET Deleted = 1 WHERE ChannelId = ?");
-          args_removedchans.push([channels[0].id, channels[0].id]);
+          queries_removedchans.push(parallelqry("UPDATE categories SET deleted = true WHERE categoryid = ?;", [channels[0].id]))
+          queries_removedchans.push(parallelqry("UPDATE channels SET deleted = true WHERE channelid = ?", [channels[0].id]))
         }
       })
       .then(() => {
-        return executeQueries(queries_removedchans, args_removedchans, 'doneWithRemovedChannels')
+        return Promise.all(queries_removedchans);
       })
       .then(async function updateChannels() {
         let queries2 = [];
         let args2 = [];
         for (let i = 0; i < channels.length; i++) {
           if (channels[i].type === 'category') {
-            await parallelqry(temp_conn, "SELECT Name FROM categories WHERE CategoryId = ?", channels[i].id)
+            await parallelqry("SELECT name FROM categories WHERE categoryid = ?", [channels[i].id])
               .then(results => {
-                if (results[0].Name !== channels[i].name) {
-                  queries2.push("INSERT INTO categories_edits(OldName, NewName, CategoryId) VALUES (?, ?, ?); UPDATE categories SET Name = ? WHERE CategoryId = ?");
-                  args2.push([results[0].Name, channels[i].name, channels[i].id, channels[i].name, channels[i].id]);
+                if (results.rows[0].name !== channels[i].name) {
+                  queries2.push(parallelqry("INSERT INTO categories_edits(categoryeditid, oldname, newname, categoryid) VALUES (?, ?, ?, ?)", [TimeUuid.now(), results.rows[0].name, channels[i].name, channels[i].id]));
+                  queries2.push(parallelqry("UPDATE categories SET Name = ? WHERE CategoryId = ?", [channels[i].name, channels[i].id]));
                 }
               });
           } else if (channels[i].type !== 'dm') {
-            await parallelqry(temp_conn, "SELECT Name,CAST(CategoryId AS CHAR) as CategoryId FROM channels WHERE ChannelId = ?", channels[i].id) //CategoryId is too big for node ints, needs to be retrieved as a string
+            await parallelqry("SELECT name,categoryid FROM channels WHERE channelid = ?", [channels[i].id]) //CategoryId is too big for node ints, needs to be retrieved as a string
               .then(results => {
-                if ((results[0].Name !== channels[i].name) || (results[0].CategoryId !== channels[i].parentID)) {
-                  queries2.push("INSERT INTO channels_edits(OldName, NewName, OldCategoryId, NewCategoryId, ChannelId) VALUES (?, ?, ?, ?, ?); UPDATE channels SET Name = ?, CategoryId = ? WHERE ChannelId = ?");
-                  args2.push([results[0].Name, channels[i].name, results[0].CategoryId, channels[i].parentID, channels[i].id, channels[i].name, channels[i].parentID, channels[i].id]);
+                let temp_categoryid = null;
+                if (results.rows[0].categoryid !== null && results.rows[0].categoryid !== undefined)
+                  temp_categoryid = results.rows[0].categoryid.toString()
+                if ((results.rows[0].name != channels[i].name) || (temp_categoryid != channels[i].parentID)) {
+                  queries2.push(parallelqry("INSERT INTO channels_edits(channeleditid, oldname, newname, oldcategoryid, newcategoryid, channelid) VALUES (?, ?, ?, ?, ?, ?);", [TimeUuid.now(), results.rows[0].name, channels[i].name, temp_categoryid, channels[i].parentID, channels[i].id]));
+                  queries2.push(parallelqry("UPDATE channels SET name = ?, categoryid = ? WHERE channelid = ?", [channels[i].name, channels[i].parentID, channels[i].id]))
                 }
               });
           }
         }
-        return executeQueries(queries2, args2, 'doneHandleChannel')
-          .then(status => {
-            temp_conn.release();
-            resolve(status);
+        return Promise.all(queries2)
+          .then(() => {
+            resolve('doneHandleChannel');
           })
       })
       .catch(err => {
-        if (temp_conn !== null)
-          temp_conn.release();
         reject(err)
       })
   });
 }
-*/
 
 function populatedb() {
   return new Promise(function(resolve, reject) {
-    var client_users = client.users.array();
+    //var client_users = client.users.array();
     //var client_guilds = client.guilds.array();
     //var client_channels = client.channels.array();
     Promise.resolve()
-      .then(async function users() {
-        for (let i = 0; i < client_users.length; i++) {
-          await handleUsers(client_users[i]);
-        }
+      .then(function users() {
+        return handleUsers(client.users, 'initialize')
       })
 
       .then(function guilds() {
         return handleGuilds(client.guilds, 'initialize');
       })
-      /*
-            .then(function channels() {
-              return handleChannels(client.channels, 'initialize');
-            })*/
+      .then(function channels() {
+        return handleChannels(client.channels, 'initialize');
+      })
       .then(function doneWithPopulate() {
         console.log('doneWithPopulate')
         resolve('doneWithPopulate');
@@ -524,18 +526,11 @@ if (!fs.existsSync(path.resolve(__dirname, './attachments'))) {
 
 */
 
-/*client.on('channelCreate', channel => {
+client.on('channelCreate', channel => {
   if (dbdone) {
-    channel_lock = true;
-    if (guild_lock) {
-      setTimeout(handleChannels([channel], 'create')
-        .then(statusmsg => console.log('channelCreate', statusmsg))
-        .catch(err => console.log("Error in 'channelCreate' function_1\n", err)), 5000)
-    } else {
-      handleChannels()
-        .then(statusmsg => console.log('channelCreate', statusmsg))
-        .catch(err => console.log("Error in 'channelCreate' function_2\n", err));
-    }
+    handleChannels([channel], 'create')
+      .then(statusmsg => console.log('channelCreate', statusmsg))
+      .catch(err => console.log("Error in 'channelCreate' function_1\n", err))
   }
 });
 
@@ -560,7 +555,6 @@ client.on('channelDelete', channel => {
       .catch(err => console.log("Error in 'channelDelete' function\n", err));
   }
 })
-*/
 
 client.on('ready', () => {
   console.log(`Logged in as ${client.user.tag}!`);
@@ -603,11 +597,12 @@ client.on('messageUpdate', function(oldmsg, newmsg) {
   }
 });
 
-
+*/
 client.on('guildMemberAdd', function(member) {
-  handleUsers(member.user, function(err, result) {
+  /*handleUsers(member.user, function(err, result) {
     console.log(result);
-  });
+  });*/
+  console.log("fired guildMemberAdd", member)
 });
 
 client.on('guildCreate', guild => {
@@ -624,7 +619,7 @@ client.on('guildCreate', guild => {
 
 client.on('guildDelete', guild => {
   if (dbdone) {
-    handleGuilds([guild], 'delete')
+    handleGuilds([guild], 'remove')
       .then(statusmsg => {
         if (statusmsg !== 'Qempty')
           console.log('guildDelete: ', statusmsg)
@@ -636,6 +631,5 @@ client.on('guildDelete', guild => {
 client.on('userUpdate', function(oldmsg, newmsg) {
   console.log("Fired userUpdate");
 });
-*/
 
 client.login(token);

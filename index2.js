@@ -154,6 +154,12 @@ function createPool() {
       .then(() => {
         return parallelqry("CREATE INDEX IF NOT EXISTS ON channels (deleted)")
       })
+      /*.then(() => {
+        return parallelqry("CREATE INDEX IF NOT EXISTS ON channels (guildid)")
+      })
+      .then(() => {
+        return parallelqry("CREATE INDEX IF NOT EXISTS ON categories (guildid)")
+      })*/
       .then(() => resolve('CreatedPool'))
       .catch(err => {
         console.log(err);
@@ -183,7 +189,6 @@ function handleUsers(client_users, action) {
           for (let i = 0; i < users.length; i++) {
             var avatarPath = path.resolve(__dirname, './avatars', users[i].id);
             await parallelqry("SELECT avatarurl, avatarpath FROM users WHERE userid = ?", [users[i].id])
-              //console.log('RISULTATI :', results);
               .then(results => {
                 let currentPath = results.rows[0].avatarpath;
                 let newPath;
@@ -297,7 +302,7 @@ function handleChannels(client_channels, action) {
     let args_removedchans = [];
     let channels = [];
 
-    if (action === 'initialize')
+    if (action === 'initialize' || action === 'guild' || action === 'guild_delete')
       channels = client_channels.array();
     else
       channels = client_channels;
@@ -320,8 +325,16 @@ function handleChannels(client_channels, action) {
     }
     Promise.all(promises1)
       .then(function handleChannelDeletes() {
-        if (action === 'initialize') {
-          return parallelqry("SELECT channelid FROM channels WHERE deleted = false")
+        if (action === 'initialize' || action === 'guild') {
+          let temp_query1;
+          let temp_query2 = [];
+          if(action === 'initialize'){
+            temp_query1 = parallelqry("SELECT channelid FROM channels WHERE deleted = false")
+          }
+          else {
+            temp_query1 = parallelqry("SELECT channelid FROM channels WHERE deleted = false AND guildid = ? ALLOW FILTERING", [channels[0].id]) //ALLOW FILTERING BECAUSE NO PRIMARY KEY https://docs.datastax.com/en/cql/3.3/cql/cql_using/useMultIndexes.html
+          }
+          Promise.resolve(temp_query1)
             .then(results => {
               let removedchannelarr = [];
               let removedchannels = [];
@@ -335,7 +348,7 @@ function handleChannels(client_channels, action) {
               return removedchannels;
             })
             .then(() => {
-              return parallelqry("SELECT categoryid FROM categories WHERE deleted = false")
+              return parallelqry("SELECT categoryid FROM categories WHERE deleted = false AND guildid = ? ALLOW FILTERING", [channels[0].id]) //ALLOW FILTERING BECAUSE NO PRIMARY KEY https://docs.datastax.com/en/cql/3.3/cql/cql_using/useMultIndexes.html
                 .then(results => {
                   let removedcategoriesarr = [];
                   let removedcategories = [];
@@ -344,17 +357,16 @@ function handleChannels(client_channels, action) {
                   }
                   removedcategories = diff(removedcategoriesarr, client_channels.keyArray());
                   for (let i = 0; i < removedcategories.length; i++) {
-                    queries_removedchans.push({
-                      query: "UPDATE categories SET deleted = false WHERE categoryid = ?",
-                      params: [removedcategories[i]]
-                    })
+                    queries_removedchans.push(parallelqry("UPDATE categories SET deleted = false WHERE categoryid = ? ALLOW FILTERING",[removedcategories[i]]));
                   }
                   return removedcategories;
                 })
             })
-        } else if (action === 'delete') {
-          queries_removedchans.push(parallelqry("UPDATE categories SET deleted = true WHERE categoryid = ?;", [channels[0].id]))
-          queries_removedchans.push(parallelqry("UPDATE channels SET deleted = true WHERE channelid = ?", [channels[0].id]))
+        } else if (action === 'delete' || action === 'guild_delete') {
+          for(let i=0; i < channels.length; i++){
+            queries_removedchans.push(parallelqry("UPDATE categories SET deleted = true WHERE categoryid = ?", [channels[i].id]))
+            queries_removedchans.push(parallelqry("UPDATE channels SET deleted = true WHERE channelid = ?", [channels[i].id]))
+          }
         }
       })
       .then(() => {
@@ -369,7 +381,7 @@ function handleChannels(client_channels, action) {
                 if (results.rows[0].name !== channels[i].name) {
                   queries2.push(parallelqry("INSERT INTO categories_edits(categoryeditid, oldname, newname, categoryid) VALUES (?, ?, ?, ?)", [TimeUuid.now(), results.rows[0].name, channels[i].name, channels[i].id])
                   .then(() => {
-                    return parallelqry("UPDATE categories SET Name = ? WHERE CategoryId = ?", [channels[i].name, channels[i].id])
+                    return parallelqry("UPDATE categories SET Name = ? WHERE categoryid = ?", [channels[i].name, channels[i].id])
                   }));
                 }
               });
@@ -529,7 +541,7 @@ if (!fs.existsSync(path.resolve(__dirname, './attachments'))) {
   userUpdate ???
 
 */
-/*
+
 client.on('channelCreate', channel => {
   if (dbdone) {
     handleChannels([channel], 'create')
@@ -559,7 +571,7 @@ client.on('channelDelete', channel => {
       .catch(err => console.log("Error in 'channelDelete' function\n", err));
   }
 })
-*/
+
 client.on('ready', () => {
   console.log(`Logged in as ${client.user.tag}!`);
   createPool()
@@ -602,7 +614,7 @@ client.on('messageUpdate', function(oldmsg, newmsg) {
 });
 
 */
-/*
+
 client.on('guildMemberAdd', function(member) {
   handleUsers(member.user, function(err, result) {
     console.log(result);
@@ -614,6 +626,10 @@ client.on('guildCreate', guild => {
   if (dbdone) {
     guild_lock = true;
     handleGuilds([guild], 'add')
+    .then(() => {
+      console.log('entrai channelllls')
+      return handleChannels(guild.channels, 'guild')
+    })
       .then(statusmsg => {
         if (statusmsg !== 'Qempty')
           console.log('guildCreate', statusmsg)
@@ -625,6 +641,9 @@ client.on('guildCreate', guild => {
 client.on('guildDelete', guild => {
   if (dbdone) {
     handleGuilds([guild], 'remove')
+    .then( () => {
+      return handleChannels(guild.channels, 'guild_delete')
+    })
       .then(statusmsg => {
         if (statusmsg !== 'Qempty')
           console.log('guildDelete: ', statusmsg)
@@ -636,5 +655,5 @@ client.on('guildDelete', guild => {
 client.on('userUpdate', function(oldmsg, newmsg) {
   console.log("Fired userUpdate");
 });
-*/
+
 client.login(token);

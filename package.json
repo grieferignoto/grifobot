@@ -1,0 +1,24 @@
+{
+  "name": "discordbot",
+  "version": "1.0.0",
+  "description": "Griefer Discord Bot",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/grieferignoto/grifobot.git"
+  },
+  "author": "Nicolò Cucinotta",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/grieferignoto/grifobot/issues"
+  },
+  "homepage": "https://github.com/grieferignoto/grifobot#readme",
+  "dependencies": {
+    "arr-diff": "^4.0.0",
+    "cassandra-driver": "^3.5.0",
+    "discord.js": "^11.3.2"
+  }
+}
